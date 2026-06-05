@@ -323,18 +323,19 @@
       transition: width 0.1s linear;
     }
 
-    /* Floating dust motes */
+    /* Floating dust motes — sit above the cover as a soft filter */
     .particles {
       position: absolute; inset: 0;
       pointer-events: none;
       overflow: hidden;
-      z-index: 3;
+      z-index: 5;
+      opacity: 0.3;
     }
     .particle {
       position: absolute; bottom: 0;
       border-radius: 50%;
       background: rgba(255, 248, 220, 1);
-      box-shadow: 0 0 8px 2px rgba(255, 230, 170, 0.85);
+      box-shadow: 0 0 8px 2px rgba(255, 230, 170, 0.9);
       animation: float linear infinite;
       will-change: transform, opacity;
     }
@@ -364,15 +365,17 @@
       50%     { transform: scale(1.08); opacity: 1; }
     }
 
-    .result-body { padding: 1.5rem 1.4rem; }
+    .result-body { padding: 1.4rem; text-align: center; }
     .one-liner {
       font-family: 'Cormorant Garamond', serif;
       font-style: italic;
-      font-size: clamp(1.2rem, 4.4vw, 1.5rem);
-      line-height: 1.4;
+      font-size: clamp(0.95rem, 3.2vw, 1.1rem);
+      line-height: 1.35;
       color: var(--brown);
       margin-bottom: 1.35rem;
       font-weight: 500;
+      text-align: center;
+      text-wrap: balance;
     }
     .song-title {
       font-family: 'Quicksand', sans-serif;
@@ -784,7 +787,7 @@
 
     // ── Render result ──────────────────────────────────────────────────
     function renderResult(d) {
-      $('one-liner').textContent = d.one_liner;
+      $('one-liner').textContent = `“${d.one_liner}”`;
       $('song-title').textContent = d.song_title;
       $('artist').textContent = d.artist;
       $('key-lyric').textContent = `"${d.key_lyric}"`;
