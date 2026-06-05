@@ -316,6 +316,13 @@ Rules:
 - Choose the line that speaks most directly to the user's specific situation.
 - iso_reasoning: one sentence on how this song sits slightly ahead of the user's state.
 
+INSTRUMENTAL EXCEPTION: If a candidate's "lyrics" content is the marker
+"[INSTRUMENTAL TRACK ...]" (and not real lyrics), that song has no lyrics by
+design. In that case, key_lyric MUST be either the song's exact title OR a brief
+evocative description of its musical character — e.g. "a slow piano figure that
+rises and resolves", "the cello entering on the second movement", or just the
+title in quotes. Do NOT invent lyrics that don't exist. Other rules still apply.
+
 ERA PREFERENCE — STRONG bias toward recent songs:
 
 The product audience is young. Recent songs (2015+) are the default cultural language.
@@ -459,9 +466,23 @@ def get_clean_candidates(
 
 _LRCLIB_UA = "hashtag-mood/1.0 (https://hashtag-mood-production.up.railway.app)"
 
+# Sentinel returned in place of lyrics when the song has no lyrics by design.
+# The selection step is taught to handle this marker explicitly.
+INSTRUMENTAL_MARKER = (
+    "[INSTRUMENTAL TRACK — this song has no lyrics by design. It speaks through "
+    "composition, melody, and arrangement. The key_lyric for this song must be "
+    "either the song's title or a short evocative description of its musical "
+    "character (e.g. \"a slow piano figure that rises and resolves\"). Do NOT "
+    "invent lyrics that do not exist.]"
+)
+
 
 def _fetch_from_lrclib(song_title: str, artist: str) -> str | None:
-    """LRCLib — free public lyrics API, no auth, cloud-IP friendly."""
+    """LRCLib — free public lyrics API, no auth, cloud-IP friendly.
+
+    Returns lyrics text, or INSTRUMENTAL_MARKER if LRCLib flags the track as
+    instrumental, or None on miss/error.
+    """
     try:
         resp = requests.get(
             "https://lrclib.net/api/get",
@@ -470,7 +491,11 @@ def _fetch_from_lrclib(song_title: str, artist: str) -> str | None:
             timeout=8,
         )
         if resp.status_code == 200:
-            text = (resp.json() or {}).get("plainLyrics", "")
+            data = resp.json() or {}
+            if data.get("instrumental"):
+                print(f"  lrclib marked {song_title} as instrumental")
+                return INSTRUMENTAL_MARKER
+            text = data.get("plainLyrics", "")
             if text and len(text.strip()) > 40:
                 return text[:4000]
     except Exception as e:
@@ -489,6 +514,10 @@ def fetch_lyrics(song_title: str, artist: str) -> str | None:
     try:
         song = genius.search_song(song_title, artist)
         if song and song.lyrics:
+            # Genius marks instrumentals as either no lyrics or an explicit tag
+            if "[Instrumental]" in song.lyrics:
+                print(f"  Genius marked {song_title} as instrumental")
+                return INSTRUMENTAL_MARKER
             print(f"  Genius fallback used for {song_title}")
             return song.lyrics[:4000]
     except Exception as e:
@@ -558,6 +587,12 @@ def recommend(
     for c in candidates:
         print(f"  - {c['song_title']} by {c['artist']}")
         lyrics = fetch_lyrics(c["song_title"], c["artist"])
+        if not lyrics and category == "instrumental":
+            # No lyrics source had the track, but the user asked for instrumental.
+            # Trust the model's pick and let the selection step write a motif-based
+            # key_lyric via the INSTRUMENTAL_MARKER protocol.
+            print(f"    (no lyrics — instrumental category, accepting as instrumental)")
+            lyrics = INSTRUMENTAL_MARKER
         if lyrics:
             candidates_with_lyrics.append({**c, "lyrics": lyrics})
         else:
