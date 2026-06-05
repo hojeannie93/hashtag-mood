@@ -16,7 +16,9 @@ load_dotenv()
 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 genius = lyricsgenius.Genius(
     os.environ["GENIUS_TOKEN"],
-    remove_section_headers=True
+    remove_section_headers=True,
+    timeout=15,
+    retries=2,
 )
 
 # ── Prompts ──────────────────────────────────────────────────────────────────
