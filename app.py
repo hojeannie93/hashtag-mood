@@ -205,6 +205,13 @@ def index():
     return send_from_directory("static", "index.html")
 
 
+@app.route("/favicon.ico")
+def favicon():
+    # Browsers auto-request this before parsing the <link rel="icon"> in <head>.
+    # Serve the SVG to avoid a console 404 on first paint.
+    return send_from_directory("static", "favicon.svg", mimetype="image/svg+xml")
+
+
 VALID_CATEGORIES = {"rhythmic", "melodic", "rock", "instrumental", "atmospheric"}
 
 
