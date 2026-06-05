@@ -1,0 +1,24 @@
+# env / secrets
+.env
+.env.*
+
+# python
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+*.egg-info/
+.pytest_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# local artifacts
+/tmp/
+*.log

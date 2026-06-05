@@ -1,0 +1,975 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>#Mood</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500;1,600&family=Quicksand:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+  <style>
+    :root {
+      --cream:      #FDF6EC;
+      --sage:       #A8BBA0;
+      --rose:       #E8B4BC;
+      --amber:      #E8C99A;
+      --sky:        #B8D4D8;
+      --forest:     #3D4F35;
+      --brown:      #3D3528;
+      --warm-white: rgba(255, 250, 240, 0.88);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      min-height: 100dvh;
+      background: var(--cream);
+      color: var(--brown);
+      font-family: 'Quicksand', sans-serif;
+      overflow-x: hidden;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* ── Background ───────────────────────────────────────────────────── */
+
+    .bg-blobs { position: fixed; inset: 0; z-index: -2; overflow: hidden; pointer-events: none; }
+    .blob {
+      position: absolute; border-radius: 50%;
+      filter: blur(80px); opacity: 0.5;
+    }
+    .blob-1 { background: var(--sage);  width: 60vw; height: 60vw; top: -10%; left: -10%; animation: drift1 22s ease-in-out infinite; }
+    .blob-2 { background: var(--rose);  width: 50vw; height: 50vw; bottom: -15%; right: -10%; animation: drift2 26s ease-in-out infinite; }
+    .blob-3 { background: var(--amber); width: 45vw; height: 45vw; top: 30%; right: 5%; animation: drift3 18s ease-in-out infinite; }
+    .blob-4 { background: var(--sky);   width: 40vw; height: 40vw; bottom: 15%; left: 5%; animation: drift4 24s ease-in-out infinite; }
+    .blob-5 { background: rgba(255,250,240,0.7); width: 50vw; height: 50vw; top: 5%; left: 25%; animation: drift5 28s ease-in-out infinite; }
+
+    @keyframes drift1 { 0%,100%{transform:translate(0,0) scale(1);} 50%{transform:translate(15vw,12vh) scale(1.1);} }
+    @keyframes drift2 { 0%,100%{transform:translate(0,0) scale(1);} 50%{transform:translate(-12vw,-15vh) scale(1.15);} }
+    @keyframes drift3 { 0%,100%{transform:translate(0,0) scale(1);} 50%{transform:translate(-20vw,15vh) scale(0.9);} }
+    @keyframes drift4 { 0%,100%{transform:translate(0,0) scale(1);} 50%{transform:translate(15vw,-12vh) scale(1.05);} }
+    @keyframes drift5 { 0%,100%{transform:translate(0,0) scale(1);} 50%{transform:translate(-8vw,8vh) scale(1.1);} }
+
+    .grain {
+      position: fixed; inset: 0; z-index: -1; pointer-events: none;
+      opacity: 0.5; mix-blend-mode: multiply;
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='0.4'/></svg>");
+    }
+
+    /* ── Screens ──────────────────────────────────────────────────────── */
+
+    .screen {
+      position: fixed; inset: 0;
+      display: none; opacity: 0;
+      transition: opacity 0.4s ease;
+      padding: 2rem 1.25rem;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .screen.active { display: flex; opacity: 1; }
+
+    #screen-input, #screen-loading, #screen-safety {
+      flex-direction: column; justify-content: center; align-items: center;
+    }
+    #screen-result {
+      flex-direction: column; align-items: center;
+      padding-top: 3rem; padding-bottom: 3rem;
+    }
+
+    /* ── Logo / heading ───────────────────────────────────────────────── */
+
+    .logo {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 0.9rem; letter-spacing: 0.3em;
+      text-transform: uppercase;
+      color: var(--forest); opacity: 0.6;
+      margin-bottom: 2.5rem; font-weight: 500;
+    }
+    .heading {
+      font-family: 'Cormorant Garamond', serif;
+      font-style: italic;
+      font-size: clamp(3rem, 9vw, 4.5rem);
+      color: var(--brown);
+      text-align: center; line-height: 1.05;
+      margin-bottom: 2.25rem; font-weight: 400;
+    }
+
+    /* ── Frosted card ─────────────────────────────────────────────────── */
+
+    .card {
+      background: var(--warm-white);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      border: 1px solid rgba(255, 255, 255, 0.6);
+      border-radius: 20px;
+      box-shadow: 0 8px 32px rgba(61, 79, 53, 0.08);
+      width: 100%; max-width: 420px;
+    }
+
+    /* ── Input card ───────────────────────────────────────────────────── */
+
+    .input-card { padding: 1.25rem; }
+    .input-card textarea {
+      width: 100%;
+      border: none; outline: none;
+      background: transparent;
+      font-family: 'Quicksand', sans-serif;
+      font-size: 1.0625rem;
+      color: var(--brown);
+      resize: none;
+      min-height: 90px;
+      line-height: 1.5;
+    }
+    .input-card textarea::placeholder {
+      font-style: italic; color: var(--brown); opacity: 0.4;
+    }
+    .input-actions {
+      display: flex; align-items: center; justify-content: space-between;
+      padding-top: 0.85rem; margin-top: 0.5rem;
+      border-top: 1px solid rgba(61, 53, 40, 0.08);
+    }
+    .mic-btn {
+      width: 38px; height: 38px;
+      border-radius: 50%;
+      border: 1px solid var(--forest);
+      background: transparent; color: var(--forest);
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: background 0.2s, color 0.2s, border-color 0.2s;
+    }
+    .mic-btn:hover { background: var(--forest); color: var(--cream); }
+    .mic-btn.listening {
+      background: #c66; color: white; border-color: #c66;
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+    .mic-btn.hidden { display: none; }
+    @keyframes pulse {
+      0%,100% { box-shadow: 0 0 0 0 rgba(204,102,102,0.55); }
+      50%     { box-shadow: 0 0 0 12px rgba(204,102,102,0); }
+    }
+    .submit-btn {
+      font-family: 'Quicksand', sans-serif;
+      font-weight: 600; font-size: 0.95rem;
+      letter-spacing: 0.01em;
+      color: var(--forest); background: transparent;
+      border: 1.5px solid var(--forest);
+      padding: 0.65rem 1.35rem;
+      border-radius: 999px;
+      cursor: pointer; min-height: 44px;
+      transition: background 0.2s, color 0.2s, opacity 0.2s;
+    }
+    .submit-btn:hover:not(:disabled) { background: var(--forest); color: var(--cream); }
+    .submit-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+    .error-msg {
+      color: #b04545; font-size: 0.875rem;
+      margin-top: 1rem; text-align: center;
+      max-width: 420px;
+    }
+
+    /* ── Category chips ───────────────────────────────────────────────── */
+
+    .vibe-row {
+      width: 100%; max-width: 420px;
+      margin-top: 1rem;
+      display: flex; flex-direction: column;
+      align-items: center;
+    }
+    .vibe-label {
+      font-family: 'Cormorant Garamond', serif;
+      font-style: italic;
+      font-size: 0.95rem;
+      color: var(--brown); opacity: 0.55;
+      margin-bottom: 0.55rem;
+      letter-spacing: 0.01em;
+    }
+    .categories {
+      display: flex; flex-wrap: wrap;
+      gap: 0.4rem;
+      justify-content: center;
+    }
+    .cat-chip {
+      font-family: 'Quicksand', sans-serif;
+      font-size: 0.82rem;
+      font-weight: 500;
+      color: var(--forest);
+      background: transparent;
+      border: 1px solid rgba(61, 79, 53, 0.35);
+      padding: 0.4rem 0.9rem;
+      border-radius: 999px;
+      cursor: pointer;
+      min-height: 32px;
+      transition: background 0.18s, color 0.18s, border-color 0.18s;
+    }
+    .cat-chip:hover { background: rgba(61, 79, 53, 0.07); }
+    .cat-chip.selected {
+      background: var(--sage);
+      border-color: var(--sage);
+      color: var(--brown);
+    }
+
+    /* ── Loading ──────────────────────────────────────────────────────── */
+
+    .loading-video {
+      width: min(280px, 65vh);
+      height: auto;
+      aspect-ratio: 828 / 1108;
+      border-radius: 18px;
+      object-fit: cover;
+      filter: drop-shadow(0 10px 28px rgba(61, 79, 53, 0.2));
+    }
+    .loading-text {
+      font-family: 'Cormorant Garamond', serif;
+      font-style: italic;
+      font-size: 1.4rem;
+      color: var(--brown); opacity: 0.75;
+      margin-top: 1.75rem;
+      letter-spacing: 0.01em;
+      text-align: center;
+    }
+    .loading-dot {
+      display: inline-block;
+      animation: blink 1.4s infinite;
+    }
+    .loading-dot:nth-child(2) { animation-delay: 0.2s; }
+    .loading-dot:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes blink { 0%, 80%, 100% { opacity: 0.3; } 40% { opacity: 1; } }
+
+    /* ── Result card ──────────────────────────────────────────────────── */
+
+    .result-card {
+      width: 100%; max-width: 390px;
+      overflow: hidden;
+      margin-bottom: 1.25rem;
+    }
+    .album-art-wrap {
+      width: 100%; aspect-ratio: 1 / 1;
+      position: relative; overflow: hidden;
+      background: linear-gradient(135deg, var(--sage), var(--amber), var(--rose));
+    }
+    .album-art-wrap img {
+      width: 100%; height: 100%;
+      object-fit: cover; display: block;
+      transform-origin: 50% 50%;
+      animation: kenBurns 14s ease-in-out infinite alternate;
+      will-change: transform;
+    }
+    @keyframes kenBurns {
+      0%   { transform: scale(1.02) translate(0, 0); }
+      100% { transform: scale(1.14) translate(-3%, 2.5%); }
+    }
+
+    /* Warm light pulse overlay */
+    .album-art-wrap::after {
+      content: '';
+      position: absolute; inset: 0;
+      pointer-events: none;
+      background: radial-gradient(circle at 50% 38%, rgba(255, 215, 150, 0.45), transparent 65%);
+      mix-blend-mode: soft-light;
+      animation: warmPulse 5s ease-in-out infinite alternate;
+      z-index: 2;
+    }
+    @keyframes warmPulse {
+      0%   { opacity: 0.4; }
+      100% { opacity: 1; }
+    }
+
+    /* Play button overlay */
+    .play-btn {
+      position: absolute;
+      left: 50%; top: 50%;
+      transform: translate(-50%, -50%);
+      width: 64px; height: 64px;
+      border-radius: 50%;
+      border: none;
+      background: rgba(255, 250, 240, 0.78);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      box-shadow: 0 4px 16px rgba(61, 79, 53, 0.18);
+      color: var(--brown);
+      cursor: pointer;
+      display: none;
+      align-items: center; justify-content: center;
+      z-index: 4;
+      transition: transform 0.18s, opacity 0.25s;
+      opacity: 0;
+    }
+    .play-btn.visible { display: flex; opacity: 1; }
+    .play-btn.hidden-while-playing { opacity: 0; pointer-events: none; }
+    .album-art-wrap:hover .play-btn.hidden-while-playing { opacity: 1; pointer-events: auto; }
+    .play-btn:active { transform: translate(-50%, -50%) scale(0.93); }
+    .play-btn svg { width: 26px; height: 26px; }
+    .play-btn .icon-pause { display: none; }
+    .play-btn.playing .icon-play { display: none; }
+    .play-btn.playing .icon-pause { display: block; }
+
+    /* Preview progress bar (bottom of album art) */
+    .preview-progress {
+      position: absolute;
+      left: 0; right: 0; bottom: 0;
+      height: 3px;
+      background: rgba(255, 250, 240, 0.25);
+      z-index: 4;
+      display: none;
+    }
+    .preview-progress.visible { display: block; }
+    .preview-progress-fill {
+      height: 100%; width: 0%;
+      background: var(--cream);
+      box-shadow: 0 0 8px rgba(255, 240, 200, 0.7);
+      transition: width 0.1s linear;
+    }
+
+    /* Floating dust motes */
+    .particles {
+      position: absolute; inset: 0;
+      pointer-events: none;
+      overflow: hidden;
+      z-index: 3;
+    }
+    .particle {
+      position: absolute; bottom: 0;
+      border-radius: 50%;
+      background: rgba(255, 248, 220, 1);
+      box-shadow: 0 0 8px 2px rgba(255, 230, 170, 0.85);
+      animation: float linear infinite;
+      will-change: transform, opacity;
+    }
+    @keyframes float {
+      0%   { transform: translate3d(0, 20%, 0) scale(0.6); opacity: 0; }
+      10%  { opacity: 1; }
+      90%  { opacity: 1; }
+      100% { transform: translate3d(var(--sway, 0), -110%, 0) scale(1); opacity: 0; }
+    }
+    .album-art-placeholder {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: linear-gradient(135deg, var(--sage), var(--amber), var(--rose));
+      background-size: 200% 200%;
+      animation: gradientShift 4s ease-in-out infinite;
+    }
+    @keyframes gradientShift {
+      0%,100% { background-position: 0% 50%; }
+      50%     { background-position: 100% 50%; }
+    }
+    .placeholder-cat {
+      width: 72px; height: 72px;
+      animation: pulseCat 2s ease-in-out infinite;
+    }
+    @keyframes pulseCat {
+      0%,100% { transform: scale(1); opacity: 0.75; }
+      50%     { transform: scale(1.08); opacity: 1; }
+    }
+
+    .result-body { padding: 1.5rem 1.4rem; }
+    .one-liner {
+      font-family: 'Cormorant Garamond', serif;
+      font-style: italic;
+      font-size: clamp(1.2rem, 4.4vw, 1.5rem);
+      line-height: 1.4;
+      color: var(--brown);
+      margin-bottom: 1.35rem;
+      font-weight: 500;
+    }
+    .song-title {
+      font-family: 'Quicksand', sans-serif;
+      font-weight: 700; font-size: 1rem;
+      color: var(--brown);
+    }
+    .artist {
+      font-family: 'Quicksand', sans-serif;
+      font-size: 0.825rem;
+      color: var(--forest); opacity: 0.65;
+      margin-top: 0.2rem;
+    }
+    .key-lyric {
+      font-family: 'Cormorant Garamond', serif;
+      font-style: italic;
+      font-size: 0.975rem;
+      color: var(--brown); opacity: 0.6;
+      border-left: 2px solid var(--sage);
+      padding-left: 0.85rem;
+      margin-top: 1.15rem;
+      line-height: 1.55;
+    }
+
+    /* ── Streaming links row ──────────────────────────────────────────── */
+
+    .streaming-row {
+      width: 100%; max-width: 390px;
+      margin-bottom: 1.1rem;
+      display: flex; flex-direction: column;
+      align-items: center;
+    }
+    .streaming-label {
+      font-family: 'Cormorant Garamond', serif;
+      font-style: italic;
+      font-size: 0.9rem;
+      color: var(--brown); opacity: 0.55;
+      margin-bottom: 0.5rem;
+      letter-spacing: 0.01em;
+    }
+    .streaming-buttons {
+      display: flex; gap: 0.5rem;
+      width: 100%;
+    }
+    .stream-btn {
+      flex: 1;
+      font-family: 'Quicksand', sans-serif;
+      font-weight: 500;
+      font-size: 0.82rem;
+      color: var(--forest);
+      background: rgba(255, 250, 240, 0.6);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border: 1px solid rgba(61, 79, 53, 0.22);
+      padding: 0.6rem 0.5rem;
+      border-radius: 12px;
+      cursor: pointer;
+      text-decoration: none;
+      text-align: center;
+      display: flex; align-items: center; justify-content: center;
+      gap: 0.25rem;
+      min-height: 40px;
+      transition: background 0.18s, border-color 0.18s, transform 0.1s;
+    }
+    .stream-btn:hover { background: rgba(255, 250, 240, 0.92); border-color: rgba(61, 79, 53, 0.4); }
+    .stream-btn:active { transform: scale(0.97); }
+    .stream-btn[hidden] { display: none; }
+
+    .actions-row {
+      display: flex; gap: 0.75rem;
+      width: 100%; max-width: 390px;
+      margin-bottom: 0.75rem;
+    }
+    .action-btn {
+      flex: 1;
+      font-family: 'Quicksand', sans-serif;
+      font-weight: 600; font-size: 0.95rem;
+      padding: 0.9rem 1rem;
+      border-radius: 999px;
+      cursor: pointer; border: none;
+      min-height: 44px;
+      transition: opacity 0.2s, transform 0.1s;
+    }
+    .action-btn:active { transform: scale(0.97); }
+    .share-btn { background: var(--forest); color: var(--cream); }
+    .save-btn  { background: rgba(255,250,240,0.92); color: var(--brown); border: 1.5px solid rgba(61,53,40,0.18); }
+    .ghost-btn {
+      width: 100%; max-width: 390px;
+      background: transparent; border: none;
+      color: var(--forest); opacity: 0.4;
+      font-family: 'Quicksand', sans-serif;
+      font-size: 0.9rem; padding: 0.75rem;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    .ghost-btn:hover { opacity: 0.7; }
+
+    /* ── Safety ───────────────────────────────────────────────────────── */
+
+    .safety-card { padding: 2rem 1.5rem; text-align: left; max-width: 420px; }
+    .safety-card h2 {
+      font-family: 'Cormorant Garamond', serif;
+      font-style: italic;
+      font-size: 1.5rem;
+      color: var(--brown);
+      margin-bottom: 1rem;
+      text-align: center;
+      font-weight: 500;
+    }
+    .safety-card p {
+      font-family: 'Quicksand', sans-serif;
+      font-size: 0.95rem;
+      color: var(--brown);
+      line-height: 1.6;
+      margin-bottom: 0.8rem;
+      white-space: pre-wrap;
+    }
+    .safety-back-btn {
+      margin-top: 1.5rem; width: 100%;
+      background: transparent;
+      border: 1.5px solid var(--forest);
+      color: var(--forest);
+      font-family: 'Quicksand', sans-serif;
+      font-weight: 600;
+      padding: 0.85rem;
+      border-radius: 999px;
+      cursor: pointer; min-height: 44px;
+      transition: background 0.2s, color 0.2s;
+    }
+    .safety-back-btn:hover { background: var(--forest); color: var(--cream); }
+  </style>
+</head>
+<body>
+
+  <div class="bg-blobs">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="blob blob-3"></div>
+    <div class="blob blob-4"></div>
+    <div class="blob blob-5"></div>
+  </div>
+  <div class="grain"></div>
+
+  <!-- ── INPUT ─────────────────────────────────────────────────────────── -->
+  <div id="screen-input" class="screen active">
+    <div class="logo">#Mood</div>
+    <h1 class="heading">What's going on?</h1>
+    <div class="card input-card">
+      <textarea id="prompt-input" placeholder="tell me what's going on…" rows="3"></textarea>
+      <div class="input-actions">
+        <button id="mic-btn" class="mic-btn" aria-label="Voice input">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="9" y="2" width="6" height="12" rx="3"/>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+            <line x1="12" y1="19" x2="12" y2="23"/>
+            <line x1="8" y1="23" x2="16" y2="23"/>
+          </svg>
+        </button>
+        <button id="submit-btn" class="submit-btn" disabled>find my song →</button>
+      </div>
+    </div>
+    <div class="vibe-row">
+      <div class="vibe-label">or steer the vibe</div>
+      <div class="categories" id="categories">
+        <button class="cat-chip" data-cat="rhythmic">rhythmic</button>
+        <button class="cat-chip" data-cat="melodic">melodic</button>
+        <button class="cat-chip" data-cat="rock">rock</button>
+        <button class="cat-chip" data-cat="instrumental">instrumental</button>
+        <button class="cat-chip" data-cat="atmospheric">atmospheric</button>
+      </div>
+    </div>
+    <div id="error-msg" class="error-msg" style="display:none"></div>
+  </div>
+
+  <!-- ── LOADING ───────────────────────────────────────────────────────── -->
+  <div id="screen-loading" class="screen">
+    <video class="loading-video" autoplay loop muted playsinline preload="auto" poster="">
+      <source src="/static/Longer_cat_animation.mp4" type="video/mp4">
+    </video>
+    <div class="loading-text">
+      flipping through the crates<span class="loading-dot">.</span><span class="loading-dot">.</span><span class="loading-dot">.</span>
+    </div>
+  </div>
+
+  <!-- ── RESULT ────────────────────────────────────────────────────────── -->
+  <div id="screen-result" class="screen">
+    <div id="result-card" class="card result-card">
+      <div class="album-art-wrap">
+        <div class="album-art-placeholder" id="art-placeholder">
+          <svg class="placeholder-cat" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="32" cy="38" r="20" fill="#FFFAF0" opacity="0.9"/>
+            <polygon points="16,26 24,38 18,40" fill="#FFFAF0" opacity="0.9"/>
+            <polygon points="48,26 40,38 46,40" fill="#FFFAF0" opacity="0.9"/>
+            <path d="M24 38 Q26 36 28 38" stroke="#3D3528" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+            <path d="M36 38 Q38 36 40 38" stroke="#3D3528" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+            <ellipse cx="24" cy="44" rx="3" ry="1.5" fill="#E8B4BC" opacity="0.6"/>
+            <ellipse cx="40" cy="44" rx="3" ry="1.5" fill="#E8B4BC" opacity="0.6"/>
+          </svg>
+        </div>
+        <img id="album-art" alt="" style="display:none" crossorigin="anonymous"/>
+        <div class="particles" id="particles"></div>
+        <button class="play-btn" id="play-btn" aria-label="Play preview">
+          <svg class="icon-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+          <svg class="icon-pause" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>
+        </button>
+        <div class="preview-progress" id="preview-progress">
+          <div class="preview-progress-fill" id="preview-progress-fill"></div>
+        </div>
+      </div>
+      <audio id="preview-audio" preload="auto" playsinline></audio>
+      <div class="result-body">
+        <div class="one-liner" id="one-liner"></div>
+        <div class="song-title" id="song-title"></div>
+        <div class="artist" id="artist"></div>
+        <div class="key-lyric" id="key-lyric"></div>
+      </div>
+    </div>
+    <div class="streaming-row">
+      <div class="streaming-label">listen on</div>
+      <div class="streaming-buttons">
+        <a class="stream-btn" id="link-spotify" target="_blank" rel="noopener">Spotify ↗</a>
+        <a class="stream-btn" id="link-apple" target="_blank" rel="noopener">Apple Music ↗</a>
+        <a class="stream-btn" id="link-youtube" target="_blank" rel="noopener">YouTube ↗</a>
+      </div>
+    </div>
+    <div class="actions-row">
+      <button class="action-btn share-btn" id="share-btn">share ↗</button>
+      <button class="action-btn save-btn" id="save-btn">save card</button>
+    </div>
+    <button class="ghost-btn" id="again-btn">try again →</button>
+  </div>
+
+  <!-- ── SAFETY ────────────────────────────────────────────────────────── -->
+  <div id="screen-safety" class="screen">
+    <div class="card safety-card">
+      <h2>This is bigger than a song.</h2>
+      <p id="safety-message"></p>
+      <button class="safety-back-btn" id="safety-back-btn">← back</button>
+    </div>
+  </div>
+
+  <script>
+    // ── State ──────────────────────────────────────────────────────────
+    const API_BASE = window.location.origin;
+    const SESSION_KEY = 'mood-session-id';
+    let sessionId = localStorage.getItem(SESSION_KEY);
+    if (!sessionId) {
+      sessionId = crypto.randomUUID();
+      localStorage.setItem(SESSION_KEY, sessionId);
+    }
+    let usedSongs = [];
+    let currentResult = null;
+    let selectedCategory = null;
+
+    // ── DOM ────────────────────────────────────────────────────────────
+    const $ = (id) => document.getElementById(id);
+    const screens = ['screen-input', 'screen-loading', 'screen-result', 'screen-safety'];
+
+    function showScreen(id) {
+      screens.forEach(s => $(s).classList.toggle('active', s === id));
+      if (id !== 'screen-result') stopPreview();
+    }
+
+    // ── Input ──────────────────────────────────────────────────────────
+    const promptInput = $('prompt-input');
+    const submitBtn = $('submit-btn');
+    const errorMsg = $('error-msg');
+
+    promptInput.addEventListener('input', () => {
+      submitBtn.disabled = promptInput.value.trim().length === 0;
+      promptInput.style.height = 'auto';
+      promptInput.style.height = promptInput.scrollHeight + 'px';
+    });
+
+    submitBtn.addEventListener('click', submitPrompt);
+    promptInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submitPrompt();
+    });
+
+    // Category chips — single-select, click again to deselect
+    document.querySelectorAll('.cat-chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        const cat = chip.dataset.cat;
+        if (selectedCategory === cat) {
+          selectedCategory = null;
+          chip.classList.remove('selected');
+        } else {
+          document.querySelectorAll('.cat-chip').forEach(c => c.classList.remove('selected'));
+          chip.classList.add('selected');
+          selectedCategory = cat;
+        }
+      });
+    });
+
+    async function submitPrompt() {
+      const prompt = promptInput.value.trim();
+      if (!prompt) return;
+      errorMsg.style.display = 'none';
+      showScreen('screen-loading');
+
+      try {
+        const resp = await fetch(`${API_BASE}/api/recommend`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt,
+            session_id: sessionId,
+            used_songs: usedSongs,
+            category: selectedCategory,
+          }),
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          throw new Error(err.error || `server returned ${resp.status}`);
+        }
+        const data = await resp.json();
+
+        if (data.safety) {
+          $('safety-message').textContent = data.message;
+          showScreen('screen-safety');
+          return;
+        }
+
+        currentResult = data;
+        usedSongs.push(`${data.song_title} by ${data.artist}`);
+        renderResult(data);
+        showScreen('screen-result');
+        logEvent('view');
+      } catch (e) {
+        errorMsg.textContent = `something went wrong: ${e.message}`;
+        errorMsg.style.display = 'block';
+        showScreen('screen-input');
+      }
+    }
+
+    // ── Particles ──────────────────────────────────────────────────────
+    function spawnParticles(n = 22) {
+      const root = $('particles');
+      root.innerHTML = '';
+      for (let i = 0; i < n; i++) {
+        const p = document.createElement('span');
+        p.className = 'particle';
+        const size = 2.5 + Math.random() * 4;
+        const left = Math.random() * 100;
+        const delay = -Math.random() * 16;
+        const duration = 9 + Math.random() * 10;
+        const sway = (Math.random() - 0.5) * 50;
+        p.style.cssText =
+          `width:${size}px;height:${size}px;` +
+          `left:${left}%;` +
+          `animation-delay:${delay}s;` +
+          `animation-duration:${duration}s;` +
+          `--sway:${sway}px;`;
+        root.appendChild(p);
+      }
+    }
+
+    // ── Audio preview ──────────────────────────────────────────────────
+    const audio = $('preview-audio');
+    const playBtn = $('play-btn');
+    const progress = $('preview-progress');
+    const progressFill = $('preview-progress-fill');
+
+    function setPreview(url) {
+      stopPreview();
+      audio.src = '';
+      progressFill.style.width = '0%';
+      if (!url) {
+        playBtn.classList.remove('visible');
+        progress.classList.remove('visible');
+        return;
+      }
+      audio.src = url;
+      playBtn.classList.add('visible');
+      progress.classList.add('visible');
+    }
+
+    function playPreview() {
+      audio.play().then(() => {
+        playBtn.classList.add('playing', 'hidden-while-playing');
+      }).catch(() => { /* autoplay blocked — user can tap */ });
+    }
+
+    function pausePreview() {
+      audio.pause();
+      playBtn.classList.remove('playing', 'hidden-while-playing');
+    }
+
+    function stopPreview() {
+      audio.pause();
+      try { audio.currentTime = 0; } catch (e) {}
+      progressFill.style.width = '0%';
+      playBtn.classList.remove('playing', 'hidden-while-playing');
+    }
+
+    playBtn.addEventListener('click', () => {
+      if (audio.paused) playPreview();
+      else pausePreview();
+    });
+
+    audio.addEventListener('timeupdate', () => {
+      if (audio.duration) {
+        progressFill.style.width = (audio.currentTime / audio.duration * 100) + '%';
+      }
+    });
+    audio.addEventListener('ended', () => {
+      playBtn.classList.remove('playing', 'hidden-while-playing');
+      progressFill.style.width = '0%';
+    });
+
+    // ── Render result ──────────────────────────────────────────────────
+    function renderResult(d) {
+      $('one-liner').textContent = d.one_liner;
+      $('song-title').textContent = d.song_title;
+      $('artist').textContent = d.artist;
+      $('key-lyric').textContent = `"${d.key_lyric}"`;
+      spawnParticles();
+      setPreview(d.preview_url);
+
+      // Streaming deep links — hide any service that has no URL
+      const links = d.streaming_links || {};
+      const services = [
+        ['link-spotify', links.spotify, 'spotify'],
+        ['link-apple',   links.apple_music, 'apple_music'],
+        ['link-youtube', links.youtube, 'youtube'],
+      ];
+      services.forEach(([id, url, key]) => {
+        const el = $(id);
+        if (url) {
+          el.href = url;
+          el.hidden = false;
+          el.onclick = () => logEvent('open_' + key);
+        } else {
+          el.hidden = true;
+        }
+      });
+
+      const img = $('album-art');
+      const ph = $('art-placeholder');
+      img.style.display = 'none';
+      ph.style.display = 'flex';
+
+      if (d.album_art_url) {
+        // Same-origin if it starts with "/", else proxy through backend
+        const src = d.album_art_url.startsWith('/')
+          ? `${API_BASE}${d.album_art_url}`
+          : `${API_BASE}/api/art-proxy?url=${encodeURIComponent(d.album_art_url)}`;
+        const tmp = new Image();
+        tmp.crossOrigin = 'anonymous';
+        tmp.onload = () => {
+          img.src = src;
+          img.style.display = 'block';
+          ph.style.display = 'none';
+          if (d.preview_url) playPreview();
+        };
+        tmp.onerror = () => {
+          if (d.preview_url) playPreview();
+        };
+        tmp.src = src;
+      } else if (d.preview_url) {
+        playPreview();
+      }
+    }
+
+    // ── Voice input ────────────────────────────────────────────────────
+    const micBtn = $('mic-btn');
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let recognition = null;
+    let listening = false;
+
+    if (SpeechRecognition) {
+      recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      recognition.onresult = (e) => {
+        let interim = '', final = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          const t = e.results[i][0].transcript;
+          if (e.results[i].isFinal) final += t;
+          else interim += t;
+        }
+        promptInput.value = (final || interim).trim();
+        promptInput.dispatchEvent(new Event('input'));
+      };
+      recognition.onend = () => {
+        listening = false;
+        micBtn.classList.remove('listening');
+      };
+      recognition.onerror = () => {
+        listening = false;
+        micBtn.classList.remove('listening');
+      };
+
+      micBtn.addEventListener('click', () => {
+        if (listening) {
+          recognition.stop();
+        } else {
+          try {
+            recognition.start();
+            listening = true;
+            micBtn.classList.add('listening');
+          } catch (e) { /* already started */ }
+        }
+      });
+    } else {
+      micBtn.classList.add('hidden');
+    }
+
+    // ── Share ──────────────────────────────────────────────────────────
+    $('share-btn').addEventListener('click', async () => {
+      if (!currentResult) return;
+      const text =
+        `${currentResult.one_liner}\n\n` +
+        `${currentResult.song_title} — ${currentResult.artist}\n` +
+        `"${currentResult.key_lyric}"\n\n` +
+        `#mood ${window.location.origin}`;
+
+      if (navigator.share) {
+        try {
+          await navigator.share({ text });
+          logEvent('share');
+        } catch (e) { /* user cancelled */ }
+      } else {
+        try {
+          await navigator.clipboard.writeText(text);
+          const btn = $('share-btn');
+          const orig = btn.textContent;
+          btn.textContent = 'copied ✓';
+          setTimeout(() => { btn.textContent = orig; }, 1800);
+          logEvent('share');
+        } catch (e) {
+          alert('Could not copy. Long-press to select text instead.');
+        }
+      }
+    });
+
+    // ── Save card ──────────────────────────────────────────────────────
+    $('save-btn').addEventListener('click', async () => {
+      if (!currentResult) return;
+      const card = $('result-card');
+      const btn = $('save-btn');
+      const orig = btn.textContent;
+      btn.textContent = 'rendering…';
+      btn.disabled = true;
+
+      try {
+        const canvas = await html2canvas(card, {
+          backgroundColor: null,
+          scale: 2,
+          useCORS: true,
+          allowTaint: false,
+          logging: false,
+        });
+        const link = document.createElement('a');
+        link.download = 'mood-card.png';
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+        logEvent('save');
+        btn.textContent = 'saved ✓';
+        setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 1800);
+      } catch (e) {
+        console.error('html2canvas failed', e);
+        $('share-btn').click();
+        btn.textContent = orig;
+        btn.disabled = false;
+      }
+    });
+
+    // ── Try again ──────────────────────────────────────────────────────
+    $('again-btn').addEventListener('click', () => {
+      promptInput.value = '';
+      promptInput.style.height = 'auto';
+      submitBtn.disabled = true;
+      showScreen('screen-input');
+      promptInput.focus();
+    });
+
+    // ── Safety back ────────────────────────────────────────────────────
+    $('safety-back-btn').addEventListener('click', () => {
+      promptInput.value = '';
+      submitBtn.disabled = true;
+      showScreen('screen-input');
+    });
+
+    // ── Events ─────────────────────────────────────────────────────────
+    function logEvent(type) {
+      if (!currentResult) return;
+      fetch(`${API_BASE}/api/event`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recommendation_id: currentResult.recommendation_id,
+          event_type: type,
+        }),
+      }).catch(() => {});
+    }
+  </script>
+</body>
+</html>
