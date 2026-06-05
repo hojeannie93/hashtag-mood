@@ -5,6 +5,7 @@ Usage: python engine.py
 """
 
 import os, json, re
+import requests
 import lyricsgenius
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -456,15 +457,43 @@ def get_clean_candidates(
     return clean[:3]
 
 
+_LRCLIB_UA = "hashtag-mood/1.0 (https://hashtag-mood-production.up.railway.app)"
+
+
+def _fetch_from_lrclib(song_title: str, artist: str) -> str | None:
+    """LRCLib — free public lyrics API, no auth, cloud-IP friendly."""
+    try:
+        resp = requests.get(
+            "https://lrclib.net/api/get",
+            params={"artist_name": artist, "track_name": song_title},
+            headers={"User-Agent": _LRCLIB_UA, "Accept": "application/json"},
+            timeout=8,
+        )
+        if resp.status_code == 200:
+            text = (resp.json() or {}).get("plainLyrics", "")
+            if text and len(text.strip()) > 40:
+                return text[:4000]
+    except Exception as e:
+        print(f"  lrclib failed for {song_title}: {type(e).__name__}: {e}")
+    return None
+
+
 def fetch_lyrics(song_title: str, artist: str) -> str | None:
+    # Primary: LRCLib (free, cloud-friendly, broad catalog for mainstream music)
+    text = _fetch_from_lrclib(song_title, artist)
+    if text:
+        return text
+
+    # Fallback: Genius (HTML scrape — may be blocked from cloud egress IPs,
+    # but has wider indie/niche coverage when it does work)
     try:
         song = genius.search_song(song_title, artist)
         if song and song.lyrics:
-            return song.lyrics[:4000]  # truncate to manage tokens
-        return None
+            print(f"  Genius fallback used for {song_title}")
+            return song.lyrics[:4000]
     except Exception as e:
-        print(f"  Lyrics fetch failed for {song_title}: {e}")
-        return None
+        print(f"  Genius failed for {song_title}: {type(e).__name__}: {e}")
+    return None
 
 
 def select_song(user_prompt: str, candidates_with_lyrics: list[dict]) -> dict:
