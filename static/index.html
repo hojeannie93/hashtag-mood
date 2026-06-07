@@ -1183,13 +1183,28 @@
     const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
 
     const shareDestHandlers = {
-      instagram: () => {
-        // No reliable web → IG Story image preload. Best effort: open IG app.
-        // User can pick from library if they saved the card first.
-        window.location.href = 'instagram://app';
-        logEvent('share_instagram');
-        // Don't close the sheet right away — give the URL handler a moment
-        setTimeout(closeShareSheet, 300);
+      instagram: async () => {
+        // Two-step chain: open system share sheet so the user can save the
+        // card to Photos OR pick Instagram directly; then deep-link into IG
+        // so they land where they intended (Story library has the saved card).
+        try {
+          const blob = await renderCardToBlob();
+          const file = fileFromBlob(blob, 'mood-card.png');
+          if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+            await navigator.share({ files: [file], title: '#Mood' });
+            // Share resolved (user saved or shared to a destination) → open IG
+            setTimeout(() => { window.location.href = 'instagram://app'; }, 400);
+          } else {
+            // No file-share support (e.g. desktop) — just open IG
+            window.location.href = 'instagram://app';
+          }
+          logEvent('share_instagram');
+        } catch (e) {
+          // AbortError = user cancelled the share sheet; do NOT redirect
+          if (e && e.name !== 'AbortError') console.error('instagram share:', e);
+        } finally {
+          closeShareSheet();
+        }
       },
       whatsapp: () => {
         window.location.href = `whatsapp://send?text=${encodeURIComponent(shareText())}`;
