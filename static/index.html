@@ -371,23 +371,30 @@
       font-family: 'Cormorant Garamond', serif;
       font-style: italic;
       font-size: clamp(0.95rem, 3.2vw, 1.1rem);
-      line-height: 1.35;
+      line-height: 1.4;
       color: var(--brown);
-      margin-bottom: 1.35rem;
+      margin-bottom: 1.65rem;
       font-weight: 500;
       text-align: center;
       text-wrap: balance;
+      overflow-wrap: break-word;
     }
     .song-title {
       font-family: 'Quicksand', sans-serif;
-      font-weight: 700; font-size: 1rem;
+      font-weight: 700;
+      font-size: clamp(1.05rem, 3.4vw, 1.15rem);
       color: var(--brown);
+      line-height: 1.3;
+      overflow-wrap: break-word;
+      word-break: break-word;
     }
     .artist {
       font-family: 'Quicksand', sans-serif;
-      font-size: 0.875rem;
+      font-size: clamp(0.85rem, 2.8vw, 0.95rem);
       color: var(--forest); opacity: 0.78;
-      margin-top: 0.2rem;
+      margin-top: 0.35rem;
+      overflow-wrap: break-word;
+      word-break: break-word;
     }
     .key-lyric {
       font-family: 'Cormorant Garamond', serif;
@@ -410,6 +417,44 @@
     .result-card.rendering .album-art-wrap img {
       animation: none !important;
       transform: scale(1.04) translate(-0.75%, 0.6%) !important;
+    }
+
+    /* Mobile: shrink album art so all four card elements fit in the viewport
+       without scrolling. Album art keeps its square aesthetic via object-fit
+       cover, but the wrapper is capped at 38vh on tall phones / smaller %
+       on shorter ones. */
+    @media (max-width: 600px) {
+      #screen-result {
+        padding-top: 1.25rem;
+        padding-bottom: 1.25rem;
+      }
+      .result-card {
+        max-width: min(360px, 92vw);
+      }
+      .album-art-wrap {
+        max-height: 38vh;
+      }
+      .result-body {
+        padding: 1.1rem 1.05rem;
+      }
+      .one-liner {
+        margin-bottom: 1.1rem;
+      }
+      .key-lyric {
+        margin-top: 0.9rem;
+        font-size: 0.95rem;
+      }
+      .streaming-row { margin-bottom: 0.75rem; }
+      .streaming-label { margin-bottom: 0.35rem; }
+      .actions-row { margin-bottom: 0.5rem; }
+    }
+
+    /* Very short phones (iPhone SE-ish) — cap album art harder */
+    @media (max-height: 700px) {
+      .album-art-wrap { max-height: 32vh; }
+      .one-liner { margin-bottom: 0.85rem; }
+      .key-lyric { margin-top: 0.7rem; }
+      .result-body { padding: 0.95rem; }
     }
 
     /* ── Streaming links row ──────────────────────────────────────────── */
