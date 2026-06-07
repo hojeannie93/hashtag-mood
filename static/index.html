@@ -970,6 +970,7 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           recommendation_id: currentResult.recommendation_id,
+          session_id: sessionId,
           event_type: type,
         }),
       }).catch(() => {});

@@ -16,9 +16,12 @@ from openai import OpenAI
 load_dotenv()
 
 from engine import recommend  # noqa: E402
+import db  # noqa: E402
 
 app = Flask(__name__, static_folder="static")
 CORS(app)
+
+db.init_db()
 
 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
@@ -233,6 +236,15 @@ def api_recommend():
         return jsonify({"error": f"engine failed: {e}"}), 500
 
     if result.get("safety"):
+        safety_id = str(uuid.uuid4())
+        db.save_recommendation(
+            rec_id=safety_id,
+            session_id=session_id,
+            prompt=prompt,
+            category=category,
+            result=result,
+            user_agent=request.headers.get("User-Agent"),
+        )
         return jsonify({"safety": True, "message": result["message"]})
 
     rec_id = str(uuid.uuid4())
@@ -270,6 +282,14 @@ def api_recommend():
     sessions.setdefault(session_id, []).append(
         f"{result['song_title']} by {result['artist']}"
     )
+    db.save_recommendation(
+        rec_id=rec_id,
+        session_id=session_id,
+        prompt=prompt,
+        category=category,
+        result=full,
+        user_agent=request.headers.get("User-Agent"),
+    )
     return jsonify(full)
 
 
@@ -303,10 +323,17 @@ def api_art_proxy():
 @app.route("/api/event", methods=["POST"])
 def api_event():
     data = request.get_json(silent=True) or {}
-    events.append({
-        "recommendation_id": data.get("recommendation_id"),
-        "event_type": data.get("event_type"),
-    })
+    rec_id = data.get("recommendation_id")
+    event_type = data.get("event_type")
+    session_id = data.get("session_id")
+    if not event_type:
+        return jsonify({"ok": False, "error": "missing event_type"}), 400
+    events.append({"recommendation_id": rec_id, "event_type": event_type})
+    db.save_event(
+        recommendation_id=rec_id,
+        session_id=session_id,
+        event_type=event_type,
+    )
     return jsonify({"ok": True})
 
 
