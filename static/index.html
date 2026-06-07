@@ -385,19 +385,31 @@
     }
     .artist {
       font-family: 'Quicksand', sans-serif;
-      font-size: 0.825rem;
-      color: var(--forest); opacity: 0.65;
+      font-size: 0.875rem;
+      color: var(--forest); opacity: 0.78;
       margin-top: 0.2rem;
     }
     .key-lyric {
       font-family: 'Cormorant Garamond', serif;
       font-style: italic;
-      font-size: 0.975rem;
-      color: var(--brown); opacity: 0.6;
+      font-size: 1rem;
+      color: var(--brown); opacity: 0.78;
       border-left: 2px solid var(--sage);
       padding-left: 0.85rem;
       margin-top: 1.15rem;
-      line-height: 1.55;
+      line-height: 1.5;
+      text-align: left;
+    }
+
+    /* When the card is being captured for share/save, keep the export clean:
+       hide controls, freeze the Ken-Burns zoom in a balanced mid-state. */
+    .result-card.rendering .play-btn,
+    .result-card.rendering .preview-progress {
+      display: none !important;
+    }
+    .result-card.rendering .album-art-wrap img {
+      animation: none !important;
+      transform: scale(1.04) translate(-0.75%, 0.6%) !important;
     }
 
     /* ── Streaming links row ──────────────────────────────────────────── */
@@ -886,43 +898,14 @@
       micBtn.classList.add('hidden');
     }
 
-    // ── Share ──────────────────────────────────────────────────────────
-    $('share-btn').addEventListener('click', async () => {
-      if (!currentResult) return;
-      const text =
-        `${currentResult.one_liner}\n\n` +
-        `${currentResult.song_title} — ${currentResult.artist}\n` +
-        `"${currentResult.key_lyric}"\n\n` +
-        `#mood ${window.location.origin}`;
-
-      if (navigator.share) {
-        try {
-          await navigator.share({ text });
-          logEvent('share');
-        } catch (e) { /* user cancelled */ }
-      } else {
-        try {
-          await navigator.clipboard.writeText(text);
-          const btn = $('share-btn');
-          const orig = btn.textContent;
-          btn.textContent = 'copied ✓';
-          setTimeout(() => { btn.textContent = orig; }, 1800);
-          logEvent('share');
-        } catch (e) {
-          alert('Could not copy. Long-press to select text instead.');
-        }
-      }
-    });
-
-    // ── Save card ──────────────────────────────────────────────────────
-    $('save-btn').addEventListener('click', async () => {
-      if (!currentResult) return;
+    // ── Card → PNG blob ────────────────────────────────────────────────
+    // Renders the result card to a clean PNG (controls hidden, animations
+    // frozen mid-state). Used by both share and save.
+    async function renderCardToBlob() {
       const card = $('result-card');
-      const btn = $('save-btn');
-      const orig = btn.textContent;
-      btn.textContent = 'rendering…';
-      btn.disabled = true;
-
+      card.classList.add('rendering');
+      // Let CSS apply before html2canvas reads computed styles
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
       try {
         const canvas = await html2canvas(card, {
           backgroundColor: null,
@@ -931,17 +914,145 @@
           allowTaint: false,
           logging: false,
         });
+        return await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+      } finally {
+        card.classList.remove('rendering');
+      }
+    }
+
+    function isMobile() {
+      if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) return true;
+      // iPadOS Safari reports as Macintosh; touch points disambiguates
+      return navigator.maxTouchPoints > 1 && /Mac/i.test(navigator.userAgent);
+    }
+
+    function shareText() {
+      return (
+        `${currentResult.song_title} — ${currentResult.artist}\n` +
+        `"${currentResult.key_lyric}"\n\n` +
+        `${currentResult.one_liner}\n\n` +
+        `#mood ${window.location.origin}`
+      );
+    }
+
+    function fileFromBlob(blob, name) {
+      return new File([blob], name, { type: 'image/png' });
+    }
+
+    function flashBtn(btn, label, ms = 1800) {
+      const orig = btn.dataset.origLabel || btn.textContent;
+      btn.dataset.origLabel = orig;
+      btn.textContent = label;
+      btn.disabled = true;
+      setTimeout(() => {
+        btn.textContent = orig;
+        btn.disabled = false;
+      }, ms);
+    }
+
+    // ── Share ──────────────────────────────────────────────────────────
+    // Tries image+text via Web Share API (lands on Instagram, Messages, etc).
+    // Falls back to clipboard copy on desktop browsers without share support.
+    $('share-btn').addEventListener('click', async () => {
+      if (!currentResult) return;
+      const btn = $('share-btn');
+      btn.textContent = 'preparing…';
+      btn.disabled = true;
+
+      try {
+        const text = shareText();
+
+        if (navigator.share && navigator.canShare) {
+          try {
+            const blob = await renderCardToBlob();
+            const file = fileFromBlob(blob, 'mood-card.png');
+            if (navigator.canShare({ files: [file] })) {
+              await navigator.share({
+                files: [file],
+                text,
+                title: '#Mood',
+              });
+              logEvent('share');
+              flashBtn(btn, 'shared ✓');
+              return;
+            }
+          } catch (e) {
+            // user cancelled OR file-share unsupported — fall through
+            if (e && e.name === 'AbortError') {
+              btn.textContent = 'share ↗';
+              btn.disabled = false;
+              return;
+            }
+          }
+          // Try text-only share if file share didn't work
+          try {
+            await navigator.share({ text, title: '#Mood' });
+            logEvent('share');
+            flashBtn(btn, 'shared ✓');
+            return;
+          } catch (e) {
+            if (e && e.name === 'AbortError') {
+              btn.textContent = 'share ↗';
+              btn.disabled = false;
+              return;
+            }
+          }
+        }
+
+        // Desktop fallback
+        await navigator.clipboard.writeText(text);
+        logEvent('share');
+        flashBtn(btn, 'copied ✓');
+      } catch (e) {
+        console.error('share failed:', e);
+        btn.textContent = 'share ↗';
+        btn.disabled = false;
+      }
+    });
+
+    // ── Save card ──────────────────────────────────────────────────────
+    // On mobile: open the share sheet so the user can "Save Image" (iOS) or
+    // "Save to Gallery" (Android). On desktop: trigger a real download.
+    $('save-btn').addEventListener('click', async () => {
+      if (!currentResult) return;
+      const btn = $('save-btn');
+      btn.textContent = 'rendering…';
+      btn.disabled = true;
+
+      try {
+        const blob = await renderCardToBlob();
+        const file = fileFromBlob(blob, 'mood-card.png');
+
+        if (isMobile() && navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+          try {
+            await navigator.share({ files: [file], title: '#Mood' });
+            logEvent('save');
+            flashBtn(btn, 'saved ✓');
+            return;
+          } catch (e) {
+            if (e && e.name === 'AbortError') {
+              btn.textContent = 'save card';
+              btn.disabled = false;
+              return;
+            }
+            // fall through to download
+          }
+        }
+
+        // Desktop / no share-files support → download via object URL
+        const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.download = 'mood-card.png';
-        link.href = canvas.toDataURL('image/png');
+        link.href = url;
+        document.body.appendChild(link);
         link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
         logEvent('save');
-        btn.textContent = 'saved ✓';
-        setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 1800);
+        flashBtn(btn, 'saved ✓');
       } catch (e) {
-        console.error('html2canvas failed', e);
-        $('share-btn').click();
-        btn.textContent = orig;
+        console.error('save failed:', e);
+        btn.textContent = 'save card';
         btn.disabled = false;
       }
     });
