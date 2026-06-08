@@ -72,6 +72,61 @@ def _normalize_artist(artist: str) -> str:
     return re.sub(r"\s+", " ", a).strip()
 
 
+# Common English stopwords excluded from keyword-trap detection. Kept short —
+# only words that would generate noise without indicating a real title-match.
+_STOPWORDS = frozenset({
+    "this", "that", "with", "when", "what", "your", "from", "have", "were",
+    "them", "they", "then", "than", "just", "like", "only", "into", "more",
+    "over", "very", "much", "some", "even", "also", "ever", "here", "there",
+    "able", "give", "make", "made", "good", "well", "such", "back", "been",
+    "being", "both", "each", "every", "many", "other", "told", "tell",
+    "would", "could", "should", "about", "their", "where", "which", "while",
+    "since", "until", "first", "going", "myself", "still", "right", "thing",
+    "things", "today", "always", "never", "after", "again", "before",
+    "between", "during", "however", "really", "perhaps",
+})
+
+
+def _substantive_words(text: str) -> set[str]:
+    """Extract >=4-character non-stopword tokens from text (lowercased)."""
+    return {
+        w for w in re.findall(r"\b[a-z']+\b", text.lower())
+        if len(w) >= 4 and w not in _STOPWORDS
+    }
+
+
+def flag_keyword_traps(user_prompt: str, candidates: list[dict]) -> list[dict]:
+    """Annotate candidates whose title shares a substantive word with the prompt.
+
+    Backstop for the prompt-level anti-trap rule. Candidates are NOT rejected
+    — selection sees the warning and decides whether the lyrical argument is
+    strong enough to justify keeping a title-echoing pick.
+    """
+    prompt_words = _substantive_words(user_prompt)
+    if not prompt_words:
+        return candidates
+    out = []
+    for c in candidates:
+        title = c.get("song_title", "")
+        title_lower = title.lower()
+        # Substring match so "breath" catches "Breathin", "Breathe", etc.
+        overlap = sorted({w for w in prompt_words if w in title_lower})
+        if overlap:
+            warning = (
+                "KEYWORD TRAP WARNING — this candidate's title shares "
+                f"{overlap} with words from the user's prompt. Title-echo is "
+                "the laziest curation move and rarely indicates real "
+                "responsiveness. REJECT this candidate UNLESS its lyrical "
+                "argument is INDEPENDENTLY a perfect specific match to the "
+                "user's situation (not just emotionally on-theme). Default: "
+                "prefer one of the other candidates."
+            )
+            c = {**c, "keyword_trap_warning": warning}
+            print(f"    ⚠ keyword trap flagged: {title} (overlap: {overlap})")
+        out.append(c)
+    return out
+
+
 def is_disqualified(title: str, artist: str) -> bool:
     cand_title = _normalize_title(title)
     cand_artist = _normalize_artist(artist)
@@ -179,14 +234,88 @@ them as candidates. If your draft list contains one, replace it before respondin
 The recommendation must feel like someone listened carefully to the specific situation
 — not pulled from a category. Before finalising, check each candidate against this list.
 
+BEFORE choosing any candidates, do this analysis silently:
+1. What is the SPECIFIC situation the user is in — paraphrased in their own register?
+   Not the emotion bucket ("sad", "stuck", "anxious") but the texture of their actual
+   words. ("They feel like the to-do list is growing faster than they can breathe."
+   "They're cataloguing every mistake at a volume that drowns out their own worth.")
+2. What is the user implicitly asking a song for — to be heard, to be sat with, to be
+   challenged, to be moved through? Not all sad prompts want the same kind of company.
+3. For each candidate you're considering: what does the song's lyrics ACTUALLY ARGUE
+   or NARRATE? Not its mood label, its specific content — the story or claim the song
+   is making.
+
+The match must happen on these specific dimensions. A song that's generally
+"appropriate for the mood" is NOT a candidate.
+
 For each candidate provide:
 - song_title
 - artist
-- why it might work (one sentence, based on the song's known emotional territory —
-  do NOT claim or invent specific lyrics)
-- uncertain (one sentence on where the fit might not hold)
+- song_argument — one sentence about what the song's lyrics specifically argue or
+  narrate (the song's actual content — its story, its claim, its position). NOT the
+  song's mood label.
+- why_it_responds — one sentence about how this song's specific argument responds to
+  THIS user's specific situation. Must name a specific element of the user's prompt
+  being addressed. NOT generic mood-matching.
+- uncertain — one sentence on where the fit might not hold
 
 Output a JSON array of 3 objects. No other text.
+
+ANTI-PATTERNS — these are FAILED candidates, always:
+- ❌ "This song is upbeat for someone who needs energy"
+   (generic mood matching, says nothing about what the song or user is specifically about)
+- ❌ "This song offers hope and patience for someone feeling stuck"
+   (could apply to any sad person; the song's specific content is invisible)
+- ❌ Picking Levitating (Dua Lipa) for "the snooze button is your only friend" because
+   both are about morning — surface keyword match, not situational match.
+- ❌ Picking any song titled "Numb" for a prompt about feeling numb — the title is
+   matching the emotion word, which is the laziest possible curation move.
+
+KEYWORD-TRAP WATCH — extra scrutiny when title echoes user vocabulary:
+If you are about to pick a song whose TITLE contains a word the user just said
+(user said "breath" → you reach for "Breathe"; user said "numb" → "Numb"; user said
+"stressed" → "Stressed Out"; user said "stuck" → "Stuck in the Middle"; user said
+"lost" → "Lost"), STOP and re-examine. This is almost always the keyword trap —
+title-echo feels like responsiveness but is actually the laziest move available.
+Reject the candidate UNLESS the song's lyrical argument is independently a perfect
+specific match (rare). Default: find a song whose ARGUMENT addresses the situation
+and whose title does NOT echo the user's vocabulary.
+
+DISTINGUISHING-ELEMENT TEST — the bar that separates real picks from defaults:
+What makes THIS prompt different from a generic version of the same emotion bucket?
+The user's specific words contain a distinguishing detail — a hedge, a contradiction,
+a specific image, a particular framing, an unusual word choice. Your candidate's
+argument must respond to ONE of those distinguishing details, not the broad category.
+
+- Generic: "feeling sad" → almost any sad song could fit.
+- Specific: "Sunday afternoon, not sad exactly, just aware of how quiet it is" →
+  distinguishing elements: the hedge "not exactly", the noticing-of-absence, the
+  Sunday-anchored stillness. A good candidate's argument must hook onto one of those,
+  not just "sad."
+
+- Saturn (Sleeping at Last) — argument is about scale-of-self perspective shift.
+  Perfect for "five years ago — grown or just changed" (the prompt IS a perspective
+  question). WRONG for "feeling stuck after my MBA" — that prompt's distinguishing
+  element is paralysis-despite-credential, not perspective. Don't reuse Saturn just
+  because the user is reflecting.
+
+Final test before submitting a candidate: if you swapped this user's prompt for a
+generic version of the same emotion (e.g. "I feel sad", "I feel stuck"), would your
+candidate's why_it_responds still hold? If yes, your candidate isn't specific enough
+— find one whose argument requires the distinguishing detail to make sense.
+
+CORRECT pattern — what real listening looks like:
+- ✅ User: "every mistake seems louder than the voice saying you're enough"
+  → Stupid Deep (Jon Bellion) — song_argument: "the song is about self-doubt that
+  feels deeper than reality itself, refusing the easy reassurance." why_it_responds:
+  "the user's word 'louder' maps directly to the song's argument that self-criticism
+  has its own volume that drowns out everything else; the song sits in that exact
+  decibel rather than turning it down."
+- ✅ User: "you realize healing isn't just about erasing what's been hurt"
+  → Cardigan (Taylor Swift) — song_argument: "the song narrates being chosen and
+  discarded and the way the hurt becomes part of the wearer." why_it_responds: "the
+  user's 'isn't just about erasing' phrasing is what the song is literally about —
+  hurt that gets folded into who you become rather than wiped clean."
 
 ISO PRINCIPLE: The song sits slightly ahead of the user's current state — not mirroring it,
 not leaping past it. Sad → sad but not despairing, arc implies a way through.
@@ -313,8 +442,54 @@ and iso_reasoning must reflect this perspective.
 
 Rules:
 - key_lyric MUST be a verbatim line copied from the lyrics provided. No paraphrasing.
-- Choose the line that speaks most directly to the user's specific situation.
-- iso_reasoning: one sentence on how this song sits slightly ahead of the user's state.
+- The key_lyric must specifically MIRROR, RESPOND TO, or COMPLETE an element of the
+  user's situation — not merely be emotionally appropriate. "Emotionally on-theme"
+  is not enough. The line must answer something specific the user said or named.
+- iso_reasoning must be CONCRETE and SPECIFIC to this prompt. It must name three
+  things: (a) the user's specific situation in their own register (paraphrased from
+  the prompt, not categorized as a mood), (b) what the song's lyrical argument
+  actually says (its specific claim or story), and (c) the iso step as a concrete
+  movement between those two points.
+
+ANTI-PATTERNS — iso_reasoning that gets rejected:
+- ❌ "This song offers hope and patience for someone feeling stuck."
+   (could be cut-and-pasted across any sad-stuck prompt; says nothing specific)
+- ❌ "This song validates the user's feelings and encourages forward movement."
+   (every song in your candidates could satisfy this; the user is invisible)
+- ❌ "The lyric speaks to the user's situation, gently nudging them forward."
+   (entirely generic — no situation, no song, no step)
+
+CORRECT pattern:
+- ✅ "The user is mired in self-doubt that feels louder than reality. Stupid Deep
+   articulates that exact volume ('what if my purpose is to die so they can have a
+   different life') and refuses to resolve it — sitting in the noise with them. The
+   iso step is being heard at that decibel, not being told to turn it down."
+- ✅ "The user is in the silence after a friendship faded without anyone being wrong.
+   In My Life sits in that exact register — affection for what was, no need to
+   reframe it. The iso step ahead is the song's quiet acceptance that some loves
+   simply pass through."
+
+The test for iso_reasoning: could you copy-paste it to another user with a different
+prompt and have it still make sense? If yes, it's too generic — rewrite.
+
+DISTINGUISHING-ELEMENT TEST applies to selection too:
+The iso_reasoning must reference a distinguishing element of THIS user's prompt
+(a hedge, an unusual word, a specific image, a contradiction) that the song's
+argument specifically addresses. If you swapped the user's prompt for a generic
+version of the same emotion ("I feel sad", "I feel stuck", "I feel anxious"), your
+iso_reasoning would no longer make sense — because the song was chosen for the
+distinguishing detail, not the broad mood.
+
+KEYWORD-TRAP WATCH applies here too: if a candidate's title echoes a word from the
+user's prompt, give it extra scrutiny before selecting. Choose it only if its
+lyrical argument is independently a perfect specific match. Otherwise prefer a
+candidate whose argument fits without the title echo.
+
+Some candidates may arrive with a "⚠ KEYWORD TRAP WARNING" line attached to their
+header — this is a system flag generated by token overlap detection, not user
+text. When you see it, treat that candidate as suspect by default. Override only
+if the song's lyrical argument is independently a perfect specific match to a
+distinguishing element of the user's situation.
 
 INSTRUMENTAL EXCEPTION: If a candidate's "lyrics" content is the marker
 "[INSTRUMENTAL TRACK ...]" (and not real lyrics), that song has no lyrics by
@@ -529,6 +704,8 @@ def select_song(user_prompt: str, candidates_with_lyrics: list[dict]) -> dict:
     lyrics_block = ""
     for i, c in enumerate(candidates_with_lyrics, 1):
         lyrics_block += f"\n\n--- Candidate {i}: {c['song_title']} by {c['artist']} ---\n"
+        if c.get("keyword_trap_warning"):
+            lyrics_block += f"\n⚠ {c['keyword_trap_warning']}\n"
         lyrics_block += c.get("lyrics", "[unavailable]")
 
     resp = client.chat.completions.create(
@@ -581,6 +758,7 @@ def recommend(
     user_prompt = clarified
 
     candidates = get_clean_candidates(user_prompt, used_songs=used_songs, category=category)
+    candidates = flag_keyword_traps(user_prompt, candidates)
 
     print("Fetching lyrics...")
     candidates_with_lyrics = []
