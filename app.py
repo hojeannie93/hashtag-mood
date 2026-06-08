@@ -148,43 +148,24 @@ def classify_emotion(one_liner: str, iso_reasoning: str) -> str:
     return ART_FALLBACK
 
 
-def lookup_itunes_track(song_title: str, artist: str) -> dict:
-    """Look up a track on iTunes, return {art_url, preview_url, track_view_url}."""
-    try:
-        resp = requests.get(
-            "https://itunes.apple.com/search",
-            params={
-                "term": f"{song_title} {artist}",
-                "entity": "song",
-                "limit": 1,
-            },
-            timeout=6,
-        )
-        results = resp.json().get("results", [])
-        if not results:
-            return {}
-        r = results[0]
-        art = r.get("artworkUrl100", "")
-        return {
-            "art_url": art.replace("100x100bb.jpg", "1000x1000bb.jpg") or None,
-            "preview_url": r.get("previewUrl"),
-            "track_view_url": r.get("trackViewUrl"),
-        }
-    except Exception as e:
-        print(f"  iTunes lookup failed: {type(e).__name__}: {e}")
-        return {}
-
-
 def pick_album_assets(one_liner: str, iso_reasoning: str,
-                      song_title: str, artist: str) -> dict:
-    """Return {album_art_url, preview_url, track_view_url}. Falls back to cat pool."""
-    track = lookup_itunes_track(song_title, artist)
-    if track.get("art_url"):
-        print(f"  iTunes hit: {song_title} (preview: {bool(track.get('preview_url'))})")
+                      song_title: str, artist: str,
+                      itunes_track: dict | None = None) -> dict:
+    """Return {album_art_url, preview_url, track_view_url}. Falls back to cat pool.
+
+    The iTunes lookup happens inside engine.recommend() in parallel with the
+    one-liner generation, so the caller passes the pre-fetched track here.
+    If not provided (e.g. external caller), we lazily fetch as a fallback.
+    """
+    if itunes_track is None:
+        from engine import lookup_itunes_track
+        itunes_track = lookup_itunes_track(song_title, artist)
+    if itunes_track.get("art_url"):
+        print(f"  iTunes hit: {song_title} (preview: {bool(itunes_track.get('preview_url'))})")
         return {
-            "album_art_url": track["art_url"],
-            "preview_url": track.get("preview_url"),
-            "track_view_url": track.get("track_view_url"),
+            "album_art_url": itunes_track["art_url"],
+            "preview_url": itunes_track.get("preview_url"),
+            "track_view_url": itunes_track.get("track_view_url"),
         }
 
     # Fallback: classify and pick a cat cover, no preview
@@ -253,6 +234,7 @@ def api_recommend():
         result.get("iso_reasoning", ""),
         result["song_title"],
         result["artist"],
+        itunes_track=result.get("itunes_track"),
     )
 
     # Streaming deep links. Apple Music gets the direct track URL when iTunes
