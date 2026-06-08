@@ -25,9 +25,21 @@ genius = lyricsgenius.Genius(
 # ── Prompts ──────────────────────────────────────────────────────────────────
 
 SAFETY_KEYWORDS = [
-    "hit me", "hitting me", "hurting me", "abuse", "abusive",
-    "suicid", "kill myself", "end my life", "self-harm", "cut myself",
-    "overdose", "rape", "assault", "he beat", "she beat", "they beat",
+    # Interpersonal violence (someone else hurting the user)
+    "hit me", "hits me", "hitting me", "hurting me", "hurts me",
+    "abuse", "abusive", "abused",
+    "he beat", "she beat", "they beat", "beats me", "beating me",
+    "slap me", "slaps me", "slapped me", "slapping me",
+    "punch me", "punches me", "punched me", "punching me",
+    "rape", "raped", "raping", "assault", "assaulted",
+    # Self-harm / suicidal ideation (the user hurting themselves)
+    "hurt myself", "hurting myself", "harm myself", "harming myself",
+    "cut myself", "cutting myself", "self-harm", "self harm",
+    "kill myself", "killing myself", "end my life", "ending my life",
+    "take my own life", "taking my own life",
+    "want to die", "wanna die", "don't want to be alive",
+    "don't want to be here", "shouldn't be here",
+    "suicid", "overdose", "od myself", "od'd",
 ]
 
 # Disqualified songs — mirrors the named list in CANDIDATE_SYSTEM. Used as a
