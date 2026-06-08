@@ -401,11 +401,20 @@
       font-style: italic;
       font-size: 1rem;
       color: var(--brown); opacity: 0.78;
-      border-left: 2px solid var(--sage);
       padding-left: 0.85rem;
       margin-top: 1.15rem;
       line-height: 1.5;
       text-align: left;
+      position: relative;
+    }
+    /* Sage left bar as pseudo so we can animate it drawing in */
+    .key-lyric::before {
+      content: '';
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 2px;
+      background: var(--sage);
+      border-radius: 1px;
     }
 
     /* When the card is being captured for share/save, keep the export clean:
@@ -417,6 +426,83 @@
     .result-card.rendering .album-art-wrap img {
       animation: none !important;
       transform: scale(1.04) translate(-0.75%, 0.6%) !important;
+    }
+
+    /* ── Reveal cascade ────────────────────────────────────────────────
+       2.2-second beat-by-beat reveal designed for screen recording.
+       The .reveal-anim class is added in JS at the moment renderResult
+       fires, and removed+re-added on each new prompt so it always
+       restarts from the first frame. */
+
+    @keyframes revealZoomIn {
+      from { transform: scale(1.08); }
+      to   { transform: scale(1); }
+    }
+    @keyframes revealRise {
+      from { opacity: 0; transform: translateY(14px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes revealRiseMuted {
+      from { opacity: 0; transform: translateY(14px); }
+      to   { opacity: 0.78; transform: translateY(0); }
+    }
+    @keyframes revealRiseGhost {
+      from { opacity: 0; transform: translateY(14px); }
+      to   { opacity: 0.4; transform: translateY(0); }
+    }
+    @keyframes revealPop {
+      0%   { opacity: 0; transform: scale(0.9); }
+      60%  { opacity: 1; transform: scale(1.04); }
+      100% { opacity: 1; transform: scale(1); }
+    }
+    @keyframes revealDrawBar {
+      from { transform: scaleY(0); }
+      to   { transform: scaleY(1); }
+    }
+
+    #screen-result.reveal-anim .album-art-wrap {
+      animation: revealZoomIn 0.7s cubic-bezier(0.2, 0.9, 0.3, 1) both;
+    }
+    #screen-result.reveal-anim .one-liner {
+      animation: revealRise 0.55s cubic-bezier(0.2, 0.9, 0.3, 1) 0.45s both;
+    }
+    #screen-result.reveal-anim .song-title {
+      transform-origin: center;
+      animation: revealPop 0.55s cubic-bezier(0.16, 1.2, 0.5, 1) 0.95s both;
+    }
+    #screen-result.reveal-anim .artist {
+      animation: revealRiseMuted 0.45s cubic-bezier(0.2, 0.9, 0.3, 1) 1.2s both;
+    }
+    #screen-result.reveal-anim .key-lyric {
+      animation: revealRiseMuted 0.55s cubic-bezier(0.2, 0.9, 0.3, 1) 1.55s both;
+    }
+    #screen-result.reveal-anim .key-lyric::before {
+      transform-origin: top center;
+      animation: revealDrawBar 0.55s cubic-bezier(0.2, 0.9, 0.3, 1) 1.5s both;
+    }
+    #screen-result.reveal-anim .streaming-row {
+      animation: revealRise 0.5s cubic-bezier(0.2, 0.9, 0.3, 1) 1.95s both;
+    }
+    #screen-result.reveal-anim .actions-row {
+      animation: revealRise 0.5s cubic-bezier(0.2, 0.9, 0.3, 1) 2.05s both;
+    }
+    #screen-result.reveal-anim .ghost-btn {
+      animation: revealRiseGhost 0.5s cubic-bezier(0.2, 0.9, 0.3, 1) 2.15s both;
+    }
+
+    /* Respect user preference for reduced motion — skip the cascade */
+    @media (prefers-reduced-motion: reduce) {
+      #screen-result.reveal-anim .album-art-wrap,
+      #screen-result.reveal-anim .one-liner,
+      #screen-result.reveal-anim .song-title,
+      #screen-result.reveal-anim .artist,
+      #screen-result.reveal-anim .key-lyric,
+      #screen-result.reveal-anim .key-lyric::before,
+      #screen-result.reveal-anim .streaming-row,
+      #screen-result.reveal-anim .actions-row,
+      #screen-result.reveal-anim .ghost-btn {
+        animation: none !important;
+      }
     }
 
     /* Mobile: shrink album art so all four card elements fit in the viewport
@@ -1003,6 +1089,14 @@
     });
 
     // ── Render result ──────────────────────────────────────────────────
+    function triggerRevealCascade() {
+      const screen = $('screen-result');
+      screen.classList.remove('reveal-anim');
+      // Force reflow so the next class add restarts animations from frame 1
+      void screen.offsetHeight;
+      requestAnimationFrame(() => screen.classList.add('reveal-anim'));
+    }
+
     function renderResult(d) {
       $('one-liner').textContent = `“${d.one_liner}”`;
       $('song-title').textContent = d.song_title;
@@ -1010,6 +1104,7 @@
       $('key-lyric').textContent = `"${d.key_lyric}"`;
       spawnParticles();
       setPreview(d.preview_url);
+      triggerRevealCascade();
 
       // Streaming deep links — hide any service that has no URL
       const links = d.streaming_links || {};
