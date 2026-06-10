@@ -2,9 +2,11 @@
 """
 #Mood backend — Flask wrapper around engine.recommend()
 """
+import io
 import os
 import re
 import uuid
+from collections import OrderedDict
 from pathlib import Path
 from urllib.parse import quote_plus
 import requests
@@ -257,6 +259,7 @@ def api_recommend():
         "preview_url": assets.get("preview_url"),
         "track_view_url": assets.get("track_view_url"),
         "streaming_links": streaming_links,
+        "plain_lyrics": result.get("plain_lyrics"),
         "recommendation_id": rec_id,
         "safety": False,
     }
@@ -317,6 +320,143 @@ def api_event():
         event_type=event_type,
     )
     return jsonify({"ok": True})
+
+
+# ── Synced lyrics via Whisper ─────────────────────────────────────────────────
+# Lazy: only runs when the user actually taps play. Result cached per-rec-id so
+# replays are instant. LRU-bounded so memory stays predictable across many recs.
+sync_cache: "OrderedDict[str, dict]" = OrderedDict()
+SYNC_CACHE_MAX = 100
+
+
+def _match_transcript_to_lyrics(whisper_words: list, plain_lyrics: str) -> list[dict]:
+    """Greedy sequential matcher.
+
+    Walks Whisper words forward; for each, looks ahead a small window of lyric
+    words for a match (case- and punctuation-insensitive, with substring
+    tolerance for plurals/conjugations). Cluster matches by line, keep the
+    earliest audio timestamp per line.
+
+    Returns [{"t": float, "line": int}, ...] sorted by t.
+    """
+    # Tokenize lyrics into (line_idx, normalized_word) tuples
+    lines = plain_lyrics.split("\n")
+    lyric_tokens: list[tuple[int, str]] = []
+    for line_idx, line in enumerate(lines):
+        for word in re.findall(r"[A-Za-z0-9']+", line):
+            normalized = re.sub(r"[^a-z0-9]", "", word.lower())
+            if normalized:
+                lyric_tokens.append((line_idx, normalized))
+
+    if not lyric_tokens or not whisper_words:
+        return []
+
+    line_first_t: dict[int, float] = {}
+    cursor = 0
+    LOOK_AHEAD = 20
+
+    for w in whisper_words:
+        raw = w.get("word", "")
+        t = w.get("start")
+        if t is None:
+            continue
+        word = re.sub(r"[^a-z0-9]", "", str(raw).lower())
+        if not word:
+            continue
+        # Look ahead in lyric tokens
+        end = min(cursor + LOOK_AHEAD, len(lyric_tokens))
+        for i in range(cursor, end):
+            line_idx, lyric_word = lyric_tokens[i]
+            # Exact, or one contains the other (handles plurals/conjugations)
+            if word == lyric_word or (len(word) >= 4 and word in lyric_word) \
+                    or (len(lyric_word) >= 4 and lyric_word in word):
+                if line_idx not in line_first_t or t < line_first_t[line_idx]:
+                    line_first_t[line_idx] = float(t)
+                cursor = i + 1
+                break
+
+    return sorted(
+        [{"t": t, "line": line_idx} for line_idx, t in line_first_t.items()],
+        key=lambda x: x["t"],
+    )
+
+
+def _transcribe_preview(preview_url: str) -> list[dict]:
+    """Download the iTunes preview and transcribe with Whisper.
+    Returns the list of word-level dicts from Whisper's verbose_json response."""
+    audio = requests.get(preview_url, timeout=10)
+    audio.raise_for_status()
+    buf = io.BytesIO(audio.content)
+    buf.name = "preview.m4a"  # Whisper API uses the filename for format detection
+    result = client.audio.transcriptions.create(
+        model="whisper-1",
+        file=buf,
+        response_format="verbose_json",
+        timestamp_granularities=["word"],
+    )
+    # The SDK returns an object with .words; convert to plain dicts for JSON safety
+    raw_words = getattr(result, "words", None) or []
+    return [
+        {"word": w.word if hasattr(w, "word") else w.get("word", ""),
+         "start": w.start if hasattr(w, "start") else w.get("start"),
+         "end": w.end if hasattr(w, "end") else w.get("end")}
+        for w in raw_words
+    ]
+
+
+def _cache_sync_result(rec_id: str, payload: dict) -> None:
+    sync_cache[rec_id] = payload
+    sync_cache.move_to_end(rec_id)
+    while len(sync_cache) > SYNC_CACHE_MAX:
+        sync_cache.popitem(last=False)
+
+
+@app.route("/api/sync-lyrics", methods=["POST"])
+def api_sync_lyrics():
+    data = request.get_json(silent=True) or {}
+    rec_id = (data.get("recommendation_id") or "").strip()
+    if not rec_id:
+        return jsonify({"status": "error", "error": "missing recommendation_id"}), 400
+
+    # Return cached result if we already transcribed this recommendation
+    if rec_id in sync_cache:
+        sync_cache.move_to_end(rec_id)
+        return jsonify(sync_cache[rec_id])
+
+    rec = recommendations.get(rec_id)
+    if not rec:
+        return jsonify({"status": "error", "error": "recommendation not found"}), 404
+
+    preview_url = rec.get("preview_url")
+    plain_lyrics = rec.get("plain_lyrics")
+
+    # No lyrics at all → instrumental or unsourced. Frontend should already be
+    # hiding the panel, but be defensive and return a clear status.
+    if not plain_lyrics:
+        payload = {"status": "instrumental", "mapping": []}
+        _cache_sync_result(rec_id, payload)
+        return jsonify(payload)
+
+    if not preview_url:
+        payload = {"status": "no_preview", "mapping": []}
+        _cache_sync_result(rec_id, payload)
+        return jsonify(payload)
+
+    # Transcribe and match
+    try:
+        words = _transcribe_preview(preview_url)
+    except Exception as e:
+        print(f"  whisper failed for {rec_id}: {type(e).__name__}: {e}")
+        payload = {"status": "transcription_failed", "mapping": []}
+        _cache_sync_result(rec_id, payload)
+        return jsonify(payload)
+
+    mapping = _match_transcript_to_lyrics(words, plain_lyrics)
+    status = "matched" if mapping else "no_match"
+    payload = {"status": status, "mapping": mapping}
+    _cache_sync_result(rec_id, payload)
+    print(f"  sync: {rec_id} → {status} ({len(mapping)} lines mapped, {len(words)} words)")
+    return jsonify(payload)
 
 
 if __name__ == "__main__":

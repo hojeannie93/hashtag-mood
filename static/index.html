@@ -419,6 +419,77 @@
       transform: scale(1.04) translate(-0.75%, 0.6%) !important;
     }
 
+    /* ── Synced lyrics panel ────────────────────────────────────────────── */
+    .lyrics-panel {
+      width: 100%;
+      max-width: 420px;
+      margin: 0.25rem 0 1rem;
+      background: var(--warm-white);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.55);
+      border-radius: 18px;
+      box-shadow: 0 6px 24px rgba(61, 79, 53, 0.07);
+      overflow: hidden;
+    }
+    .lyrics-panel[hidden] { display: none; }
+    .lyrics-panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.65rem 1.15rem 0.55rem;
+      font-family: 'Quicksand', sans-serif;
+      font-size: 0.78rem;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: lowercase;
+      color: var(--forest);
+      opacity: 0.65;
+      border-bottom: 1px solid rgba(61, 53, 40, 0.06);
+    }
+    .lyrics-panel-hint {
+      font-family: 'Cormorant Garamond', serif;
+      font-style: italic;
+      font-size: 0.85rem;
+      letter-spacing: 0.02em;
+      text-transform: none;
+      opacity: 0.75;
+    }
+    .lyrics-panel-hint[hidden] { display: none; }
+    .lyrics-panel-scroll {
+      max-height: min(50vh, 360px);
+      overflow-y: auto;
+      padding: 0.7rem 1.15rem 1rem;
+      scroll-behavior: smooth;
+      -webkit-overflow-scrolling: touch;
+    }
+    .lyric-line {
+      font-family: 'Cormorant Garamond', serif;
+      font-style: italic;
+      font-size: 1.02rem;
+      line-height: 1.5;
+      color: var(--brown);
+      opacity: 0.55;
+      padding: 0.18rem 0.4rem;
+      margin: 0.05rem 0;
+      border-radius: 6px;
+      transition: background 0.32s ease, opacity 0.32s ease, color 0.32s ease;
+    }
+    .lyric-line.current {
+      opacity: 1;
+      color: var(--brown);
+      background: rgba(168, 187, 160, 0.22);  /* sage tint */
+      font-weight: 500;
+    }
+    /* Blank lines (stanza breaks) hidden entirely — keeps lyrics flowing
+       compactly in the panel without empty gaps. */
+    .lyric-line.is-blank { display: none; }
+    /* When the card is being captured (save/share), the lyrics panel is a
+       "live" UI element — not part of the screenshot artefact. */
+    .result-card.rendering ~ .lyrics-panel {
+      display: none !important;
+    }
+
     /* Mobile: shrink album art so all four card elements fit in the viewport
        without scrolling. Album art keeps its square aesthetic via object-fit
        cover, but the wrapper is capped at 38vh on tall phones / smaller %
@@ -864,6 +935,15 @@
         <div class="key-lyric" id="key-lyric"></div>
       </div>
     </div>
+    <!-- Synced lyrics panel — appears below the card when the chosen song has lyrics.
+         Whisper-driven highlight kicks in 2-5s after play. Read-along works without. -->
+    <div class="lyrics-panel" id="lyrics-panel" hidden>
+      <div class="lyrics-panel-header">
+        <span>lyrics</span>
+        <span class="lyrics-panel-hint" id="lyrics-panel-hint" hidden>syncing…</span>
+      </div>
+      <div class="lyrics-panel-scroll" id="lyrics-panel-scroll"></div>
+    </div>
     <div class="streaming-row">
       <div class="streaming-label">listen on</div>
       <div class="streaming-buttons">
@@ -1091,6 +1171,8 @@
     function playPreview() {
       audio.play().then(() => {
         playBtn.classList.add('playing', 'hidden-while-playing');
+        // Kick off Whisper sync request when the user actually plays.
+        ensureSyncMapping();
       }).catch(() => { /* autoplay blocked — user can tap */ });
     }
 
@@ -1115,11 +1197,102 @@
       if (audio.duration) {
         progressFill.style.width = (audio.currentTime / audio.duration * 100) + '%';
       }
+      updateSyncedLine(audio.currentTime);
     });
     audio.addEventListener('ended', () => {
       playBtn.classList.remove('playing', 'hidden-while-playing');
       progressFill.style.width = '0%';
     });
+
+    // ── Synced lyrics panel state ──────────────────────────────────────
+    let currentSyncMapping = null;   // [{t: float, line: int}, ...] sorted by t
+    let currentSyncRecId = null;     // tracks which rec this mapping is for
+    let lastHighlightedLine = -1;
+    let syncRequestInFlight = false;
+
+    function renderLyricsPanel(plainLyrics) {
+      const panel = $('lyrics-panel');
+      const scroll = $('lyrics-panel-scroll');
+      const hint = $('lyrics-panel-hint');
+      // Reset state
+      currentSyncMapping = null;
+      currentSyncRecId = null;
+      lastHighlightedLine = -1;
+      hint.hidden = true;
+      scroll.innerHTML = '';
+      if (!plainLyrics || typeof plainLyrics !== 'string') {
+        panel.hidden = true;
+        return;
+      }
+      const lines = plainLyrics.split('\n');
+      lines.forEach((line, i) => {
+        const div = document.createElement('div');
+        const trimmed = line.trim();
+        div.className = trimmed ? 'lyric-line' : 'lyric-line is-blank';
+        div.dataset.i = String(i);
+        div.textContent = trimmed;
+        scroll.appendChild(div);
+      });
+      panel.hidden = false;
+      scroll.scrollTop = 0;
+    }
+
+    async function ensureSyncMapping() {
+      if (!currentResult) return;
+      // No lyrics panel → no sync to do.
+      if ($('lyrics-panel').hidden) return;
+      // Already requested or completed for this rec.
+      if (syncRequestInFlight) return;
+      if (currentSyncRecId === currentResult.recommendation_id && currentSyncMapping) return;
+
+      const hint = $('lyrics-panel-hint');
+      hint.hidden = false;
+      syncRequestInFlight = true;
+      const recId = currentResult.recommendation_id;
+      try {
+        const resp = await fetch(`${API_BASE}/api/sync-lyrics`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ recommendation_id: recId }),
+        });
+        const data = await resp.json();
+        // If the user already moved on to a new result, ignore stale response.
+        if (!currentResult || currentResult.recommendation_id !== recId) return;
+        if (data.status === 'matched' && Array.isArray(data.mapping) && data.mapping.length) {
+          currentSyncMapping = data.mapping;
+          currentSyncRecId = recId;
+        }
+      } catch (e) {
+        /* Silent fallback: panel stays readable, just no highlight. */
+      } finally {
+        syncRequestInFlight = false;
+        hint.hidden = true;
+      }
+    }
+
+    function updateSyncedLine(currentTime) {
+      if (!currentSyncMapping || currentSyncMapping.length === 0) return;
+      // Find largest mapping entry whose t <= currentTime (binary search).
+      const m = currentSyncMapping;
+      let lo = 0, hi = m.length - 1, idx = -1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (m[mid].t <= currentTime) { idx = mid; lo = mid + 1; }
+        else hi = mid - 1;
+      }
+      if (idx < 0) return;
+      const targetLine = m[idx].line;
+      if (targetLine === lastHighlightedLine) return;
+      const scroll = $('lyrics-panel-scroll');
+      const prevEl = scroll.querySelector('.lyric-line.current');
+      if (prevEl) prevEl.classList.remove('current');
+      const nextEl = scroll.querySelector(`.lyric-line[data-i="${targetLine}"]`);
+      if (nextEl) {
+        nextEl.classList.add('current');
+        nextEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      lastHighlightedLine = targetLine;
+    }
 
     // ── Render result ──────────────────────────────────────────────────
     function renderResult(d) {
@@ -1129,6 +1302,7 @@
       $('key-lyric').textContent = `"${d.key_lyric}"`;
       spawnParticles();
       setPreview(d.preview_url);
+      renderLyricsPanel(d.plain_lyrics);
 
       // Streaming deep links — hide any service that has no URL
       const links = d.streaming_links || {};

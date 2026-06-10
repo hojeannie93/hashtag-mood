@@ -897,6 +897,20 @@ def recommend(
     print("Selecting best match...")
     song = select_song(user_prompt, candidates_with_lyrics)
 
+    # Find the chosen candidate's lyrics (for the read-along panel on the frontend).
+    # Match by title+artist; fall back to None when the chosen song has no lyrics
+    # (instrumental or missing source).
+    chosen_lyrics = next(
+        (c["lyrics"] for c in candidates_with_lyrics
+         if c["song_title"] == song["song_title"] and c["artist"] == song["artist"]),
+        None,
+    )
+    plain_lyrics = (
+        chosen_lyrics
+        if chosen_lyrics and chosen_lyrics != INSTRUMENTAL_MARKER
+        else None
+    )
+
     # ── Parallel: one-liner generation + iTunes lookup ──
     # These are independent — both depend only on `song`, not on each other.
     # Running them concurrently saves ~500ms-1s per request.
@@ -914,6 +928,7 @@ def recommend(
         "key_lyric": song["key_lyric"],
         "iso_reasoning": song["iso_reasoning"],
         "itunes_track": itunes_track,
+        "plain_lyrics": plain_lyrics,
         "safety": False,
     }
 
