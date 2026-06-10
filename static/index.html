@@ -558,9 +558,9 @@
       overflow: hidden;
     }
     .story-art-frame {
-      width: 760px;
-      height: 760px;
-      border-radius: 56px;
+      width: 720px;
+      height: 720px;
+      border-radius: 52px;
       overflow: hidden;
       box-shadow:
         0 30px 80px rgba(61, 79, 53, 0.18),
@@ -1253,6 +1253,13 @@
             setTimeout(resolve, 4000);
           });
         }
+      }
+
+      // Wait for Google Fonts (Cormorant Garamond, Quicksand) to be loaded.
+      // Without this, html2canvas may capture in fallback fonts if save fires
+      // before fonts arrive — which can shift layout or skip italic glyphs.
+      if (document.fonts && document.fonts.ready) {
+        try { await document.fonts.ready; } catch (e) { /* tolerate */ }
       }
 
       // Two RAFs to let the browser settle text layout
