@@ -530,6 +530,109 @@
     }
     .ghost-btn:hover { opacity: 0.7; }
 
+    /* ── Story-format card (for save/share to Instagram Stories) ──────────
+       Renders to exactly 1080x1920 (Instagram Story aspect ratio).
+       Kept off-screen so users never see it; html2canvas captures it. */
+    .story-card {
+      position: fixed;
+      left: -20000px;
+      top: 0;
+      width: 1080px;
+      height: 1920px;
+      box-sizing: border-box;
+      padding: 200px 90px 260px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      background:
+        radial-gradient(ellipse at 25% 18%, rgba(168, 187, 160, 0.40) 0%, transparent 50%),
+        radial-gradient(ellipse at 78% 84%, rgba(232, 180, 188, 0.36) 0%, transparent 52%),
+        radial-gradient(ellipse at 86% 22%, rgba(232, 201, 154, 0.32) 0%, transparent 48%),
+        radial-gradient(ellipse at 14% 76%, rgba(184, 212, 216, 0.28) 0%, transparent 48%),
+        var(--cream);
+      font-family: 'Quicksand', sans-serif;
+      color: var(--brown);
+      pointer-events: none;
+      z-index: -10;
+      overflow: hidden;
+    }
+    .story-art-frame {
+      width: 760px;
+      height: 760px;
+      border-radius: 56px;
+      overflow: hidden;
+      box-shadow:
+        0 30px 80px rgba(61, 79, 53, 0.18),
+        0 12px 32px rgba(61, 53, 40, 0.12);
+      flex-shrink: 0;
+      background: linear-gradient(135deg, var(--sage) 0%, var(--amber) 50%, var(--rose) 100%);
+    }
+    .story-art-frame img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .story-one-liner {
+      font-family: 'Cormorant Garamond', serif;
+      font-style: italic;
+      font-weight: 500;
+      font-size: 54px;
+      line-height: 1.32;
+      color: var(--brown);
+      text-align: center;
+      max-width: 880px;
+      margin-top: 64px;
+      text-wrap: balance;
+    }
+    .story-song-block {
+      text-align: center;
+      margin-top: 48px;
+    }
+    .story-song-title {
+      font-family: 'Quicksand', sans-serif;
+      font-weight: 700;
+      font-size: 44px;
+      color: var(--brown);
+      letter-spacing: 0.005em;
+    }
+    .story-artist {
+      font-family: 'Quicksand', sans-serif;
+      font-weight: 500;
+      font-size: 30px;
+      color: var(--forest);
+      opacity: 0.78;
+      margin-top: 12px;
+    }
+    .story-lyric {
+      font-family: 'Cormorant Garamond', serif;
+      font-style: italic;
+      font-size: 32px;
+      line-height: 1.45;
+      color: var(--brown);
+      opacity: 0.78;
+      max-width: 760px;
+      margin-top: 48px;
+      padding-left: 36px;
+      border-left: 4px solid var(--sage);
+      text-align: left;
+      align-self: center;
+    }
+    .story-watermark {
+      position: absolute;
+      bottom: 130px;
+      left: 0;
+      right: 0;
+      text-align: center;
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 28px;
+      letter-spacing: 0.45em;
+      color: var(--forest);
+      opacity: 0.55;
+      text-transform: uppercase;
+    }
+
     /* ── Share sheet (bottom sheet) ────────────────────────────────────── */
 
     .share-sheet {
@@ -774,6 +877,22 @@
       <button class="action-btn save-btn" id="save-btn">save card</button>
     </div>
     <button class="ghost-btn" id="again-btn">try again →</button>
+  </div>
+
+  <!-- ── STORY-FORMAT CARD (offscreen, rendered for save/share to IG Stories) ─
+       Rendered at exactly 1080x1920 (9:16 ratio = Instagram Story).
+       Lives off-screen so users never see it; html2canvas captures it on demand. -->
+  <div id="story-card" class="story-card" aria-hidden="true">
+    <div class="story-art-frame">
+      <img id="story-art" alt="" crossorigin="anonymous"/>
+    </div>
+    <div class="story-one-liner" id="story-one-liner"></div>
+    <div class="story-song-block">
+      <div class="story-song-title" id="story-song-title"></div>
+      <div class="story-artist" id="story-artist"></div>
+    </div>
+    <div class="story-lyric" id="story-lyric"></div>
+    <div class="story-watermark">#mood</div>
   </div>
 
   <!-- ── SHARE SHEET (bottom modal) ────────────────────────────────────── -->
@@ -1103,25 +1222,53 @@
     }
 
     // ── Card → PNG blob ────────────────────────────────────────────────
-    // Renders the result card to a clean PNG (controls hidden, animations
-    // frozen mid-state). Used by both share and save.
+    // Renders the 1080x1920 Story-format card off-screen, then captures it.
+    // Used by save and share so the output is Instagram-Story-ready.
     async function renderCardToBlob() {
-      const card = $('result-card');
-      card.classList.add('rendering');
-      // Let CSS apply before html2canvas reads computed styles
-      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-      try {
-        const canvas = await html2canvas(card, {
-          backgroundColor: null,
-          scale: 2,
-          useCORS: true,
-          allowTaint: false,
-          logging: false,
-        });
-        return await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-      } finally {
-        card.classList.remove('rendering');
+      if (!currentResult) throw new Error('no current result to render');
+
+      // Populate the story card with current data
+      $('story-one-liner').textContent = `“${currentResult.one_liner}”`;
+      $('story-song-title').textContent = currentResult.song_title;
+      $('story-artist').textContent = currentResult.artist;
+      $('story-lyric').textContent = `"${currentResult.key_lyric}"`;
+
+      // Set album art src — same proxying rules as the on-screen card
+      const storyArt = $('story-art');
+      const artUrl = currentResult.album_art_url;
+      if (artUrl) {
+        const src = artUrl.startsWith('/')
+          ? `${API_BASE}${artUrl}`
+          : `${API_BASE}/api/art-proxy?url=${encodeURIComponent(artUrl)}`;
+        // Force a fresh load (in case src is identical to a prior render)
+        if (storyArt.src !== src) {
+          storyArt.src = src;
+        }
+        // Wait for it to be ready
+        if (!(storyArt.complete && storyArt.naturalWidth > 0)) {
+          await new Promise((resolve, reject) => {
+            storyArt.onload = resolve;
+            storyArt.onerror = reject;
+            // Safety timeout — still try to render if the image stalls
+            setTimeout(resolve, 4000);
+          });
+        }
       }
+
+      // Two RAFs to let the browser settle text layout
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+      const story = $('story-card');
+      const canvas = await html2canvas(story, {
+        backgroundColor: null,
+        scale: 1,           // story-card is already 1080x1920
+        width: 1080,
+        height: 1920,
+        useCORS: true,
+        allowTaint: false,
+        logging: false,
+      });
+      return await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
     }
 
     function isMobile() {
