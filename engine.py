@@ -393,7 +393,18 @@ For each candidate provide:
   being addressed. NOT generic mood-matching.
 - uncertain — one sentence on where the fit might not hold
 
-Output a JSON array of 3 objects. No other text.
+Output a JSON object with this exact shape (no other text, no prose, no
+clarifying questions):
+{
+  "candidates": [
+    { "song_title": "...", "artist": "...", "song_argument": "...",
+      "why_it_responds": "...", "uncertain": "..." },
+    { "song_title": "...", "artist": "...", "song_argument": "...",
+      "why_it_responds": "...", "uncertain": "..." },
+    { "song_title": "...", "artist": "...", "song_argument": "...",
+      "why_it_responds": "...", "uncertain": "..." }
+  ]
+}
 
 ANTI-PATTERNS — these are FAILED candidates, always:
 - ❌ "This song is upbeat for someone who needs energy"
@@ -748,8 +759,17 @@ def get_candidates(
             {"role": "user", "content": user_prompt + cat_clause + exclusion}
         ],
         temperature=0.8,
+        # Second-tier guarantee: the API itself refuses to return non-JSON,
+        # so even if the model wants to ask a clarifying question, it can't.
+        response_format={"type": "json_object"},
     )
-    return _extract_json(resp.choices[0].message.content)
+    parsed = _extract_json(resp.choices[0].message.content)
+    # Unwrap the {"candidates": [...]} envelope the schema asks for.
+    if isinstance(parsed, dict) and "candidates" in parsed:
+        return parsed["candidates"]
+    # Defensive fallback if the model ignored the wrapper (shouldn't happen
+    # with response_format on, but kept for safety): treat as the array shape.
+    return parsed if isinstance(parsed, list) else []
 
 
 def get_clean_candidates(
@@ -875,6 +895,7 @@ def select_song(user_prompt: str, candidates_with_lyrics: list[dict]) -> dict:
             {"role": "user", "content": f"User's situation: {user_prompt}\n\nLyrics:{lyrics_block}"}
         ],
         temperature=0.3,
+        response_format={"type": "json_object"},
     )
     return _extract_json(resp.choices[0].message.content)
 

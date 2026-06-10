@@ -611,7 +611,7 @@
       width: 1080px;
       height: 1920px;
       box-sizing: border-box;
-      padding: 200px 90px 260px;
+      padding: 175px 90px 215px;
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -629,9 +629,9 @@
       overflow: hidden;
     }
     .story-art-frame {
-      width: 720px;
-      height: 720px;
-      border-radius: 52px;
+      width: 700px;
+      height: 700px;
+      border-radius: 48px;
       overflow: hidden;
       box-shadow:
         0 30px 80px rgba(61, 79, 53, 0.18),
@@ -649,12 +649,12 @@
       font-family: 'Cormorant Garamond', serif;
       font-style: italic;
       font-weight: 500;
-      font-size: 54px;
+      font-size: 50px;
       line-height: 1.32;
       color: var(--brown);
       text-align: center;
-      max-width: 880px;
-      margin-top: 64px;
+      max-width: 860px;
+      margin-top: 56px;
       text-wrap: balance;
     }
     .story-song-block {
@@ -664,43 +664,53 @@
     .story-song-title {
       font-family: 'Quicksand', sans-serif;
       font-weight: 700;
-      font-size: 44px;
+      font-size: 40px;
       color: var(--brown);
       letter-spacing: 0.005em;
     }
     .story-artist {
       font-family: 'Quicksand', sans-serif;
       font-weight: 500;
-      font-size: 30px;
+      font-size: 26px;
       color: var(--forest);
       opacity: 0.78;
-      margin-top: 12px;
+      margin-top: 10px;
+    }
+    /* Small sage divider between the song block and the lyric, for visual
+       rhythm and to signal the lyric as a distinct register. */
+    .story-divider {
+      width: 64px;
+      height: 2px;
+      background: var(--sage);
+      border-radius: 1px;
+      margin-top: 44px;
+      opacity: 0.85;
     }
     .story-lyric {
       font-family: 'Cormorant Garamond', serif;
       font-style: italic;
-      font-size: 32px;
+      font-size: 30px;
       line-height: 1.45;
       color: var(--brown);
-      opacity: 0.78;
-      max-width: 760px;
-      margin-top: 48px;
-      padding-left: 36px;
-      border-left: 4px solid var(--sage);
-      text-align: left;
+      opacity: 0.82;
+      max-width: 740px;
+      margin-top: 28px;
+      text-align: center;
+      text-wrap: balance;
       align-self: center;
     }
     .story-watermark {
       position: absolute;
-      bottom: 130px;
+      bottom: 110px;
       left: 0;
       right: 0;
       text-align: center;
       font-family: 'Cormorant Garamond', serif;
-      font-size: 28px;
-      letter-spacing: 0.45em;
+      font-style: italic;
+      font-size: 26px;
+      letter-spacing: 0.5em;
       color: var(--forest);
-      opacity: 0.55;
+      opacity: 0.45;
       text-transform: uppercase;
     }
 
@@ -971,6 +981,7 @@
       <div class="story-song-title" id="story-song-title"></div>
       <div class="story-artist" id="story-artist"></div>
     </div>
+    <div class="story-divider" aria-hidden="true"></div>
     <div class="story-lyric" id="story-lyric"></div>
     <div class="story-watermark">#mood</div>
   </div>
