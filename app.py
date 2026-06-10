@@ -424,10 +424,65 @@ def _match_transcript_to_lyrics(whisper_words: list, plain_lyrics: str) -> list[
     # Re-run with best start to build the mapping
     _, line_first_t = run_match(best_start, record=True)
 
-    return sorted(
+    sparse = sorted(
         [{"t": t, "line": line_idx} for line_idx, t in line_first_t.items()],
         key=lambda x: x["t"],
     )
+
+    # Smooth the sparse Whisper mapping into a dense line-by-line walk-forward.
+    # The matcher's sparse output causes the frontend highlight to JUMP between
+    # matched lines (skipping unmatched intermediates). Instead: use the first
+    # few matches to infer a per-line cadence, then advance one line at a time
+    # at that cadence until the preview ends. This trades Whisper's per-line
+    # precision (which drifts on its own anyway) for smooth, jump-free UX.
+    num_lines = len(lines)
+    return _smooth_to_line_by_line(sparse, num_lines, preview_duration=30.0)
+
+
+def _smooth_to_line_by_line(
+    sparse: list[dict],
+    num_lines: int,
+    preview_duration: float = 30.0,
+) -> list[dict]:
+    """Turn a sparse Whisper-derived mapping into a dense one-line-per-step walk.
+
+    Use the median delta between consecutive matched lines to infer the song's
+    per-line cadence, then walk forward from the first match through every line
+    at that cadence until time runs past the preview's end.
+
+    If we don't have at least 2 matches to infer cadence from, or the inferred
+    cadence is implausible (very short / very long sung lines), fall back to the
+    sparse mapping.
+    """
+    if len(sparse) < 2:
+        return sparse
+
+    deltas: list[float] = []
+    for i in range(len(sparse) - 1):
+        dline = sparse[i + 1]["line"] - sparse[i]["line"]
+        dt = sparse[i + 1]["t"] - sparse[i]["t"]
+        if dline > 0 and dt > 0:
+            deltas.append(dt / dline)
+
+    if not deltas:
+        return sparse
+
+    deltas.sort()
+    cadence = deltas[len(deltas) // 2]  # median is robust to one bad measurement
+
+    # Sanity-clamp: typical sung lines are between half a second and ~8 seconds.
+    # Outside that, the cadence inference is suspect — keep the sparse mapping.
+    if cadence < 0.5 or cadence > 8.0:
+        return sparse
+
+    anchor = sparse[0]
+    dense: list[dict] = []
+    for line_idx in range(anchor["line"], num_lines):
+        t = anchor["t"] + (line_idx - anchor["line"]) * cadence
+        if t > preview_duration:
+            break
+        dense.append({"t": round(t, 2), "line": line_idx})
+    return dense
 
 
 def _transcribe_preview(preview_url: str) -> list[dict]:
