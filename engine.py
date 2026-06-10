@@ -307,6 +307,43 @@ them as candidates. If your draft list contains one, replace it before respondin
 The recommendation must feel like someone listened carefully to the specific situation
 — not pulled from a category. Before finalising, check each candidate against this list.
 
+NO EXPLICIT SONGS — SAFETY RULE, HARD ENFORCEMENT:
+
+Do NOT suggest songs whose original recording contains explicit content —
+profanity, sexually explicit lyrics, graphic violence, slurs, hard-drug
+references, or any content flagged "Explicit" on Spotify / Apple Music. The
+product is screen-recorded and shared on TikTok and Instagram Stories, often
+by young users; the lyric panel below the card displays the FULL song lyrics
+verbatim, so any explicit content lands directly on a teenager's screen.
+
+This rule applies before all other preferences:
+- If a song you're considering has an "Explicit" tag (e.g. most Kendrick
+  Lamar tracks, Doja Cat's "Streets," Drake's "God's Plan" has clean radio
+  cut but original is borderline, Lil Wayne, Eminem, SZA's "Kill Bill" has
+  explicit lyrics, Olivia Rodrigo's "good 4 u" has profanity, etc.) → pick
+  a different song. Do NOT swap to the "clean version" — that's a different
+  record. Pick a fundamentally different song.
+- If you're uncertain whether a track is explicit, err on the side of caution
+  and choose something else. Better to lose a candidate than ship explicit
+  lyrics into a shareable card.
+- Profanity rule of thumb: any song where the words fuck, shit, bitch, ass,
+  damn (more than once), goddamn, nigga, slut, whore, or sexual slang ("head",
+  "bust", etc) appear in the original recording is OUT, regardless of how
+  well it might fit the prompt emotionally.
+- Whole-genre alert: a lot of hip-hop, rap, and contemporary R&B catalog is
+  explicit. When the user picks the "rhythmic" category, lean toward clean
+  artists (Mac Miller's later catalogue, Anderson .Paak's tamer cuts, Tyler
+  the Creator's "See You Again" and similar, Frank Ocean, Solange, Jordan
+  Rakei, James Blake when low-arousal). Avoid Drake / Future / Lil Baby /
+  Megan Thee Stallion etc. unless you're certain the specific track is clean.
+
+If the only emotionally-perfect match is explicit, return a clearly-marked
+non-explicit alternative whose argument addresses the same situation, even
+if the fit is slightly less direct. NEVER include an explicit song in the
+candidate set on the assumption "selection step will catch it" — by the
+time it gets to selection, the engine is already committed to one of the
+three picks you returned.
+
 BEFORE choosing any candidates, do this analysis silently:
 1. What is the SPECIFIC situation the user is in — paraphrased in their own register?
    Not the emotion bucket ("sad", "stuck", "anxious") but the texture of their actual
@@ -523,6 +560,16 @@ Rules:
   the prompt, not categorized as a mood), (b) what the song's lyrical argument
   actually says (its specific claim or story), and (c) the iso step as a concrete
   movement between those two points.
+
+NO EXPLICIT SONGS — SAFETY RULE:
+- If any candidate's lyrics block contains explicit content (profanity, sexually
+  explicit language, slurs, hard-drug references), reject that candidate and pick
+  one of the remaining two — even if the explicit one's lyric matches the user's
+  situation slightly better. The card is shared on TikTok and Instagram Stories
+  with the full song lyrics displayed; explicit lyrics are not acceptable.
+- The candidate generation step is supposed to filter these out; this is a
+  backstop. If all three candidates are explicit, still pick the cleanest one
+  but treat that as a signal the upstream filter failed.
 
 ANTI-PATTERNS — iso_reasoning that gets rejected:
 - ❌ "This song offers hope and patience for someone feeling stuck."
