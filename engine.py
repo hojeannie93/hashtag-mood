@@ -140,6 +140,66 @@ def flag_keyword_traps(user_prompt: str, candidates: list[dict]) -> list[dict]:
     return out
 
 
+def _extract_json(raw: str):
+    """Robustly extract JSON from a possibly noisy LLM response.
+
+    Strategy:
+    1. Strip markdown code fences and whitespace.
+    2. Try a direct json.loads — happy path for clean responses.
+    3. If that fails, walk the text looking for the first balanced bracket
+       span ([...] or {...}) and parse from there. Handles cases where the
+       model prepends/appends extra text around valid JSON.
+    4. On total failure, raise with the raw response in the message so we
+       can diagnose what the model returned.
+    """
+    text = raw.strip()
+    text = re.sub(r"^```(?:json)?\s*\n?", "", text)
+    text = re.sub(r"\n?\s*```\s*$", "", text)
+
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Walk for the first balanced JSON span (array or object).
+    for opener, closer in (("[", "]"), ("{", "}")):
+        start = text.find(opener)
+        if start == -1:
+            continue
+        depth = 0
+        in_string = False
+        escape = False
+        for i in range(start, len(text)):
+            c = text[i]
+            if escape:
+                escape = False
+                continue
+            if c == "\\":
+                escape = True
+                continue
+            if c == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if c == opener:
+                depth += 1
+            elif c == closer:
+                depth -= 1
+                if depth == 0:
+                    candidate = text[start:i + 1]
+                    try:
+                        return json.loads(candidate)
+                    except json.JSONDecodeError:
+                        break  # try the other opener
+
+    snippet = text[:300].replace("\n", "\\n")
+    raise json.JSONDecodeError(
+        f"Could not extract JSON from LLM response (first 300 chars: {snippet!r})",
+        text, 0,
+    )
+
+
 def is_disqualified(title: str, artist: str) -> bool:
     cand_title = _normalize_title(title)
     cand_artist = _normalize_artist(artist)
@@ -618,10 +678,7 @@ def get_candidates(
         ],
         temperature=0.8,
     )
-    text = resp.choices[0].message.content.strip()
-    text = re.sub(r'^```(?:json)?\n?', '', text)
-    text = re.sub(r'\n?```$', '', text)
-    return json.loads(text)
+    return _extract_json(resp.choices[0].message.content)
 
 
 def get_clean_candidates(
@@ -748,10 +805,7 @@ def select_song(user_prompt: str, candidates_with_lyrics: list[dict]) -> dict:
         ],
         temperature=0.3,
     )
-    text = resp.choices[0].message.content.strip()
-    text = re.sub(r'^```(?:json)?\n?', '', text)
-    text = re.sub(r'\n?```$', '', text)
-    return json.loads(text)
+    return _extract_json(resp.choices[0].message.content)
 
 
 def lookup_itunes_track(song_title: str, artist: str) -> dict:
