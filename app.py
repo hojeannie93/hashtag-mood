@@ -330,15 +330,23 @@ SYNC_CACHE_MAX = 100
 
 
 def _match_transcript_to_lyrics(whisper_words: list, plain_lyrics: str) -> list[dict]:
-    """Greedy sequential matcher.
+    """Best-anchor sequential matcher.
 
-    Walks Whisper words forward; for each, looks ahead a small window of lyric
-    words for a match (case- and punctuation-insensitive, with substring
-    tolerance for plurals/conjugations). Cluster matches by line, keep the
-    earliest audio timestamp per line.
+    iTunes previews can start anywhere in the song — sometimes at the chorus,
+    sometimes at verse 2, sometimes at the song's beginning. A naive
+    sequential matcher starting at line 0 fails when the preview actually
+    starts later, because its cursor never advances to the chorus.
+
+    This matcher tries every plausible starting position in the lyrics
+    (anywhere one of the first several transcribed words appears) and picks
+    the position that produces the most matches. Then it runs sequentially
+    from there to build the final mapping.
 
     Returns [{"t": float, "line": int}, ...] sorted by t.
     """
+    LOOK_AHEAD = 25
+    SUBSTR_MIN = 4
+
     # Tokenize lyrics into (line_idx, normalized_word) tuples
     lines = plain_lyrics.split("\n")
     lyric_tokens: list[tuple[int, str]] = []
@@ -348,32 +356,73 @@ def _match_transcript_to_lyrics(whisper_words: list, plain_lyrics: str) -> list[
             if normalized:
                 lyric_tokens.append((line_idx, normalized))
 
-    if not lyric_tokens or not whisper_words:
-        return []
-
-    line_first_t: dict[int, float] = {}
-    cursor = 0
-    LOOK_AHEAD = 20
-
+    # Normalize Whisper words into (t, normalized_word) tuples
+    whisper_tokens: list[tuple[float, str]] = []
     for w in whisper_words:
-        raw = w.get("word", "")
         t = w.get("start")
         if t is None:
             continue
-        word = re.sub(r"[^a-z0-9]", "", str(raw).lower())
-        if not word:
-            continue
-        # Look ahead in lyric tokens
-        end = min(cursor + LOOK_AHEAD, len(lyric_tokens))
-        for i in range(cursor, end):
-            line_idx, lyric_word = lyric_tokens[i]
-            # Exact, or one contains the other (handles plurals/conjugations)
-            if word == lyric_word or (len(word) >= 4 and word in lyric_word) \
-                    or (len(lyric_word) >= 4 and lyric_word in word):
-                if line_idx not in line_first_t or t < line_first_t[line_idx]:
-                    line_first_t[line_idx] = float(t)
-                cursor = i + 1
-                break
+        word = re.sub(r"[^a-z0-9]", "", str(w.get("word", "")).lower())
+        if word:
+            whisper_tokens.append((float(t), word))
+
+    if not lyric_tokens or not whisper_tokens:
+        return []
+
+    def matches_at(a: str, b: str) -> bool:
+        if a == b:
+            return True
+        if len(a) >= SUBSTR_MIN and a in b:
+            return True
+        if len(b) >= SUBSTR_MIN and b in a:
+            return True
+        return False
+
+    def run_match(start_idx: int, record: bool = False):
+        """Walk whisper_tokens against lyric_tokens starting at start_idx.
+        Returns (match_count, line_first_t) — line_first_t only populated
+        when record=True (counting-only path is faster on the hot loop)."""
+        cursor = start_idx
+        count = 0
+        line_first_t: dict[int, float] = {}
+        for t, word in whisper_tokens:
+            end = min(cursor + LOOK_AHEAD, len(lyric_tokens))
+            for i in range(cursor, end):
+                lyric_line, lyric_word = lyric_tokens[i]
+                if matches_at(word, lyric_word):
+                    count += 1
+                    if record:
+                        if lyric_line not in line_first_t or t < line_first_t[lyric_line]:
+                            line_first_t[lyric_line] = t
+                    cursor = i + 1
+                    break
+        return count, line_first_t
+
+    # Build a word index: lyric token index by normalized word
+    word_to_indexes: dict[str, list[int]] = {}
+    for i, (_, w) in enumerate(lyric_tokens):
+        word_to_indexes.setdefault(w, []).append(i)
+
+    # Candidate starting positions: any lyric index whose word matches one
+    # of the first ~8 transcribed words (or matches via substring rule).
+    candidate_starts: set[int] = {0}  # always try the song's beginning
+    LEAD = 8
+    for _, word in whisper_tokens[:LEAD]:
+        # Exact-word hits via index
+        if word in word_to_indexes:
+            candidate_starts.update(word_to_indexes[word])
+        # Fuzzy: only if substring rule could fire (saves O(N) per word otherwise)
+        if len(word) >= SUBSTR_MIN:
+            for lw, idxs in word_to_indexes.items():
+                if word in lw or lw in word:
+                    candidate_starts.update(idxs)
+
+    # Pick the starting position with the most matches. Tie-break to earliest
+    # position so we prefer the song's natural ordering when scores are equal.
+    best_start = min(candidate_starts, key=lambda i: (-run_match(i)[0], i))
+
+    # Re-run with best start to build the mapping
+    _, line_first_t = run_match(best_start, record=True)
 
     return sorted(
         [{"t": t, "line": line_idx} for line_idx, t in line_first_t.items()],
