@@ -245,9 +245,20 @@
       width: 100%; max-width: 390px;
       overflow: hidden;
       margin-bottom: 1.25rem;
+      /* flex-shrink: 0 prevents the parent flex container (#screen-result with
+         flex-direction: column) from collapsing this card to just the height
+         of its first child (the album-art-wrap), which would clip the
+         .result-body below via overflow: hidden. Diagnosed via Playwright. */
+      flex-shrink: 0;
     }
     .album-art-wrap {
-      width: 100%; aspect-ratio: 1 / 1;
+      width: 100%;
+      /* Fluid height responsive to both viewport height AND width. Replaces
+         the previous `aspect-ratio: 1 / 1` + `max-height: 38vh` combo, which
+         interacted badly with the parent flex container and caused the
+         layout-collapse bug. min(38vh, 90vw) ensures album art never grows
+         past the card width even in landscape phone orientations. */
+      height: clamp(240px, min(38vh, 90vw), 360px);
       position: relative; overflow: hidden;
       background: linear-gradient(135deg, var(--sage), var(--amber), var(--rose));
     }
@@ -431,6 +442,7 @@
       border-radius: 18px;
       box-shadow: 0 6px 24px rgba(61, 79, 53, 0.07);
       overflow: hidden;
+      flex-shrink: 0;  /* prevent the parent flex column from collapsing it */
     }
     .lyrics-panel[hidden] { display: none; }
     .lyrics-panel-header {
@@ -502,9 +514,8 @@
       .result-card {
         max-width: min(360px, 92vw);
       }
-      .album-art-wrap {
-        max-height: 38vh;
-      }
+      /* Album-art-wrap height is now handled by clamp() in the base rule —
+         no per-media override needed. */
       .result-body {
         padding: 1.1rem 1.05rem;
       }
@@ -520,9 +531,9 @@
       .actions-row { margin-bottom: 0.5rem; }
     }
 
-    /* Very short phones (iPhone SE-ish) — cap album art harder */
+    /* Very short phones (iPhone SE-ish) — tighten margins and padding.
+       Album art height already capped by the clamp() in the base rule. */
     @media (max-height: 700px) {
-      .album-art-wrap { max-height: 32vh; }
       .one-liner { margin-bottom: 0.85rem; }
       .key-lyric { margin-top: 0.7rem; }
       .result-body { padding: 0.95rem; }
@@ -535,6 +546,7 @@
       margin-bottom: 1.1rem;
       display: flex; flex-direction: column;
       align-items: center;
+      flex-shrink: 0;  /* don't let the parent flex column collapse it */
     }
     .streaming-label {
       font-family: 'Cormorant Garamond', serif;
@@ -576,6 +588,7 @@
       display: flex; gap: 0.75rem;
       width: 100%; max-width: 390px;
       margin-bottom: 0.75rem;
+      flex-shrink: 0;
     }
     .action-btn {
       flex: 1;
@@ -597,6 +610,7 @@
       font-family: 'Quicksand', sans-serif;
       font-size: 0.9rem; padding: 0.75rem;
       cursor: pointer;
+      flex-shrink: 0;
       transition: opacity 0.2s;
     }
     .ghost-btn:hover { opacity: 0.7; }
@@ -612,7 +626,10 @@
       height: 1920px;
       box-sizing: border-box;
       padding: 175px 90px 215px;
-      display: flex;
+      /* Default hidden — only switched to display: flex during html2canvas
+         capture (see renderCardToBlob). Prevents the off-screen story-card
+         from being visible or selectable on the main result page. */
+      display: none;
       flex-direction: column;
       align-items: center;
       justify-content: flex-start;
@@ -1447,20 +1464,28 @@
         try { await document.fonts.ready; } catch (e) { /* tolerate */ }
       }
 
-      // Two RAFs to let the browser settle text layout
-      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-
+      // Switch the story-card to display: flex for the capture, then back
+      // to display: none in the finally block. Default-hidden prevents the
+      // off-screen story-card from being visible or selectable on the main
+      // result page (e.g. via inspector or accidental focus).
       const story = $('story-card');
-      const canvas = await html2canvas(story, {
-        backgroundColor: null,
-        scale: 1,           // story-card is already 1080x1920
-        width: 1080,
-        height: 1920,
-        useCORS: true,
-        allowTaint: false,
-        logging: false,
-      });
-      return await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+      story.style.display = 'flex';
+      try {
+        // Two RAFs to let the browser settle text layout
+        await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+        const canvas = await html2canvas(story, {
+          backgroundColor: null,
+          scale: 1,           // story-card is already 1080x1920
+          width: 1080,
+          height: 1920,
+          useCORS: true,
+          allowTaint: false,
+          logging: false,
+        });
+        return await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+      } finally {
+        story.style.display = '';  // revert to stylesheet default (display: none)
+      }
     }
 
     function isMobile() {
