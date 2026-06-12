@@ -230,52 +230,59 @@ def api_recommend():
         )
         return jsonify({"safety": True, "message": result["message"]})
 
-    rec_id = str(uuid.uuid4())
-    assets = pick_album_assets(
-        result["one_liner"],
-        result.get("iso_reasoning", ""),
-        result["song_title"],
-        result["artist"],
-        itunes_track=result.get("itunes_track"),
-    )
+    def _hydrate_pick(pick: dict) -> dict:
+        """Turn an engine pick into a fully-shaped client payload — assets,
+        streaming links, fresh rec_id — and persist to DB + memory."""
+        pick_rec_id = str(uuid.uuid4())
+        assets = pick_album_assets(
+            pick["one_liner"],
+            pick.get("iso_reasoning", ""),
+            pick["song_title"],
+            pick["artist"],
+            itunes_track=pick.get("itunes_track"),
+        )
+        q = quote_plus(f"{pick['artist']} {pick['song_title']}")
+        streaming_links = {
+            "apple_music": assets.get("track_view_url"),
+            "spotify":     f"https://open.spotify.com/search/{q}",
+            "youtube":     f"https://music.youtube.com/search?q={q}",
+        }
+        full_pick = {
+            "one_liner": pick["one_liner"],
+            "song_title": pick["song_title"],
+            "artist": pick["artist"],
+            "key_lyric": pick["key_lyric"],
+            "iso_reasoning": pick.get("iso_reasoning", ""),
+            "album_art_url": assets["album_art_url"],
+            "preview_url": assets.get("preview_url"),
+            "track_view_url": assets.get("track_view_url"),
+            "streaming_links": streaming_links,
+            "plain_lyrics": pick.get("plain_lyrics"),
+            "recommendation_id": pick_rec_id,
+            "safety": False,
+        }
+        recommendations[pick_rec_id] = full_pick
+        sessions.setdefault(session_id, []).append(
+            f"{pick['song_title']} by {pick['artist']}"
+        )
+        db.save_recommendation(
+            rec_id=pick_rec_id,
+            session_id=session_id,
+            prompt=prompt,
+            category=category,
+            result=full_pick,
+            user_agent=request.headers.get("User-Agent"),
+        )
+        return full_pick
 
-    # Streaming deep links. Apple Music gets the direct track URL when iTunes
-    # returns one; Spotify and YouTube Music use search URLs that land on the
-    # right track without needing OAuth.
-    q = quote_plus(f"{result['artist']} {result['song_title']}")
-    streaming_links = {
-        "apple_music": assets.get("track_view_url"),
-        "spotify":     f"https://open.spotify.com/search/{q}",
-        "youtube":     f"https://music.youtube.com/search?q={q}",
-    }
+    primary_full = _hydrate_pick(result["primary_pick"])
+    alternate_fulls = [_hydrate_pick(p) for p in result.get("alternate_picks", [])]
 
-    full = {
-        "one_liner": result["one_liner"],
-        "song_title": result["song_title"],
-        "artist": result["artist"],
-        "key_lyric": result["key_lyric"],
-        "iso_reasoning": result.get("iso_reasoning", ""),
-        "album_art_url": assets["album_art_url"],
-        "preview_url": assets.get("preview_url"),
-        "track_view_url": assets.get("track_view_url"),
-        "streaming_links": streaming_links,
-        "plain_lyrics": result.get("plain_lyrics"),
-        "recommendation_id": rec_id,
-        "safety": False,
-    }
-    recommendations[rec_id] = full
-    sessions.setdefault(session_id, []).append(
-        f"{result['song_title']} by {result['artist']}"
-    )
-    db.save_recommendation(
-        rec_id=rec_id,
-        session_id=session_id,
-        prompt=prompt,
-        category=category,
-        result=full,
-        user_agent=request.headers.get("User-Agent"),
-    )
-    return jsonify(full)
+    # Response keeps the primary pick's fields at top level (so existing client
+    # paths — sync-lyrics, story-card, share — keep working unchanged) and adds
+    # alternate_picks for the skip-to-next-song flow.
+    response = {**primary_full, "alternate_picks": alternate_fulls}
+    return jsonify(response)
 
 
 _ITUNES_HOST_RE = re.compile(r"^https://is\d+(?:-ssl)?\.mzstatic\.com/")

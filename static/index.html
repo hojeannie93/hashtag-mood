@@ -318,6 +318,43 @@
     .play-btn.playing .icon-play { display: none; }
     .play-btn.playing .icon-pause { display: block; }
 
+    /* ── Skip / Back nav buttons (overlay the album art edges) ──────────── */
+    .album-nav-btn {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 44px; height: 44px;
+      border-radius: 50%;
+      border: none;
+      background: rgba(20, 18, 12, 0.42);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      color: var(--cream);
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      z-index: 6;
+      transition: opacity 0.18s ease, transform 0.12s ease, background 0.18s ease;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+    }
+    .album-nav-btn:hover { background: rgba(20, 18, 12, 0.6); }
+    .album-nav-btn:active { transform: translateY(-50%) scale(0.9); }
+    .album-nav-btn svg { width: 20px; height: 20px; display: block; }
+    .album-nav-btn.is-disabled { opacity: 0.3; pointer-events: none; }
+    .album-nav-btn.is-loading { pointer-events: none; }
+    .album-nav-btn.is-loading svg { display: none; }
+    #back-btn { left: 10px; }
+    #skip-btn { right: 10px; }
+    .nav-spinner {
+      display: none;
+      width: 18px; height: 18px;
+      border: 2.5px solid rgba(255, 250, 240, 0.35);
+      border-top-color: var(--cream);
+      border-radius: 50%;
+      animation: navSpin 0.7s linear infinite;
+    }
+    .album-nav-btn.is-loading .nav-spinner { display: block; }
+    @keyframes navSpin { to { transform: rotate(360deg); } }
+
     /* Preview progress bar (bottom of album art) */
     .preview-progress {
       position: absolute;
@@ -946,6 +983,14 @@
         </div>
         <img id="album-art" alt="" style="display:none" crossorigin="anonymous"/>
         <div class="particles" id="particles"></div>
+        <button class="album-nav-btn is-disabled" id="back-btn" aria-label="Previous song">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+          <span class="nav-spinner" aria-hidden="true"></span>
+        </button>
+        <button class="album-nav-btn" id="skip-btn" aria-label="Next song">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+          <span class="nav-spinner" aria-hidden="true"></span>
+        </button>
         <button class="play-btn" id="play-btn" aria-label="Play preview">
           <svg class="icon-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
           <svg class="icon-pause" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>
@@ -983,7 +1028,7 @@
       <button class="action-btn share-btn" id="share-btn">share ↗</button>
       <button class="action-btn save-btn" id="save-btn">save card</button>
     </div>
-    <button class="ghost-btn" id="again-btn">try again →</button>
+    <button class="ghost-btn" id="again-btn">Let's try a different Mood →</button>
   </div>
 
   <!-- ── STORY-FORMAT CARD (offscreen, rendered for save/share to IG Stories) ─
@@ -1070,8 +1115,19 @@
       localStorage.setItem(SESSION_KEY, sessionId);
     }
     let usedSongs = [];
-    let currentResult = null;
+    let currentResult = null;          // points to pickStack[currentPickIndex]
     let selectedCategory = null;
+    // ── Skip-to-next-song state ────────────────────────────────────────
+    // pickStack holds every pick the user has seen this result-screen, in order
+    // shown. currentPickIndex points into it. cachedNextPicks holds the unshown
+    // alternates from the most recent /api/recommend call. Skipping past the
+    // last cached alternate transparently fetches a fresh batch.
+    let pickStack = [];
+    let currentPickIndex = -1;
+    let cachedNextPicks = [];
+    let currentPrompt = '';
+    let currentRecCategory = null;
+    let skipFetchInFlight = false;
 
     // ── DOM ────────────────────────────────────────────────────────────
     const $ = (id) => document.getElementById(id);
@@ -1142,10 +1198,17 @@
           return;
         }
 
-        currentResult = data;
+        // Initialize the pick stack with the primary pick + cache the runners-up.
+        currentPrompt = prompt;
+        currentRecCategory = selectedCategory;
+        pickStack = [data];
+        currentPickIndex = 0;
+        cachedNextPicks = Array.isArray(data.alternate_picks) ? data.alternate_picks.slice() : [];
         usedSongs.push(`${data.song_title} by ${data.artist}`);
-        renderResult(data);
+        renderPick(data);
         showScreen('screen-result');
+        updateNavButtonsState();
+        preloadAlternateAssets();
         logEvent('view');
       } catch (e) {
         errorMsg.textContent = `something went wrong: ${e.message}`;
@@ -1323,7 +1386,11 @@
     }
 
     // ── Render result ──────────────────────────────────────────────────
-    function renderResult(d) {
+    // Renders any pick (primary or runner-up) into the visible result card.
+    // currentResult is updated here so all downstream code (share, save,
+    // sync-lyrics, story-card) keeps working unchanged after a skip/back.
+    function renderPick(d) {
+      currentResult = d;
       $('one-liner').textContent = `“${d.one_liner}”`;
       $('song-title').textContent = d.song_title;
       $('artist').textContent = d.artist;
@@ -1682,9 +1749,116 @@
       promptInput.value = '';
       promptInput.style.height = 'auto';
       submitBtn.disabled = true;
+      // Clear the per-prompt skip state; usedSongs is kept across prompts so the
+      // engine still avoids repeating songs the user has already seen.
+      pickStack = [];
+      currentPickIndex = -1;
+      cachedNextPicks = [];
+      currentPrompt = '';
+      currentRecCategory = null;
       showScreen('screen-input');
       promptInput.focus();
     });
+
+    // ── Skip / Back navigation ─────────────────────────────────────────
+    function updateNavButtonsState() {
+      const backBtn = $('back-btn');
+      const skipBtn = $('skip-btn');
+      backBtn.classList.toggle('is-disabled', currentPickIndex <= 0);
+      // Skip is never permanently disabled — even at stack end with empty
+      // cache, the tap triggers a fresh /api/recommend.
+      skipBtn.classList.toggle('is-loading', skipFetchInFlight);
+    }
+
+    function preloadAlternateAssets() {
+      // Warm the browser cache for runner-up album art so the skip swap is
+      // visually instant.
+      cachedNextPicks.forEach(p => {
+        if (!p.album_art_url) return;
+        const src = p.album_art_url.startsWith('/')
+          ? `${API_BASE}${p.album_art_url}`
+          : `${API_BASE}/api/art-proxy?url=${encodeURIComponent(p.album_art_url)}`;
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.src = src;
+      });
+    }
+
+    async function handleSkip() {
+      if (skipFetchInFlight) return;
+      const outgoingRecId = currentResult && currentResult.recommendation_id;
+
+      // Case 1: re-traverse forward through history (no network call).
+      if (currentPickIndex < pickStack.length - 1) {
+        currentPickIndex += 1;
+        renderPick(pickStack[currentPickIndex]);
+        updateNavButtonsState();
+        logEvent('skip', outgoingRecId);
+        return;
+      }
+
+      // Case 2: pop the next cached pick (no network call).
+      if (cachedNextPicks.length > 0) {
+        const next = cachedNextPicks.shift();
+        pickStack.push(next);
+        currentPickIndex = pickStack.length - 1;
+        usedSongs.push(`${next.song_title} by ${next.artist}`);
+        renderPick(next);
+        updateNavButtonsState();
+        logEvent('skip', outgoingRecId);
+        return;
+      }
+
+      // Case 3: cache empty AND at stack end → fetch a fresh batch.
+      if (!currentPrompt) return;
+      skipFetchInFlight = true;
+      updateNavButtonsState();
+      try {
+        const resp = await fetch(`${API_BASE}/api/recommend`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: currentPrompt,
+            session_id: sessionId,
+            used_songs: usedSongs,
+            category: currentRecCategory,
+          }),
+        });
+        if (!resp.ok) throw new Error(`server returned ${resp.status}`);
+        const data = await resp.json();
+        if (data.safety) {
+          // Safety path mid-skip is extremely rare but possible if prompt
+          // re-triggers the filter on retry. Fall back to the safety screen.
+          $('safety-message').textContent = data.message;
+          showScreen('screen-safety');
+          return;
+        }
+        pickStack.push(data);
+        cachedNextPicks = Array.isArray(data.alternate_picks) ? data.alternate_picks.slice() : [];
+        currentPickIndex = pickStack.length - 1;
+        usedSongs.push(`${data.song_title} by ${data.artist}`);
+        renderPick(data);
+        preloadAlternateAssets();
+        logEvent('skip', outgoingRecId);
+      } catch (e) {
+        showToast('couldn’t fetch the next song — try again');
+      } finally {
+        skipFetchInFlight = false;
+        updateNavButtonsState();
+      }
+    }
+
+    function handleBack() {
+      if (currentPickIndex <= 0) return;
+      const outgoingRecId = currentResult && currentResult.recommendation_id;
+      currentPickIndex -= 1;
+      renderPick(pickStack[currentPickIndex]);
+      updateNavButtonsState();
+      logEvent('back', outgoingRecId);
+    }
+
+    $('skip-btn').addEventListener('click', handleSkip);
+    $('back-btn').addEventListener('click', handleBack);
 
     // ── Safety back ────────────────────────────────────────────────────
     $('safety-back-btn').addEventListener('click', () => {
@@ -1694,13 +1868,16 @@
     });
 
     // ── Events ─────────────────────────────────────────────────────────
-    function logEvent(type) {
-      if (!currentResult) return;
+    // recIdOverride lets skip/back log against the OUTGOING pick (the song
+    // being dismissed), not the one we're swapping in.
+    function logEvent(type, recIdOverride) {
+      const recId = recIdOverride || (currentResult && currentResult.recommendation_id);
+      if (!recId) return;
       fetch(`${API_BASE}/api/event`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          recommendation_id: currentResult.recommendation_id,
+          recommendation_id: recId,
           session_id: sessionId,
           event_type: type,
         }),

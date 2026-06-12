@@ -573,11 +573,12 @@ for "perfectly matched" is genuinely high. The era pressure here is real.
 
 SELECTION_SYSTEM = """
 You are a music recommender. You have been given a user's emotional state
-and the full lyrics of 3 candidate songs.
+and the full lyrics of up to 3 candidate songs.
 
-Select the ONE song whose actual lyrics best match the user's specific situation,
+RANK ALL of the candidates from best to worst match for the user's specific situation,
 applying the iso principle (match where they are, pull slightly forward toward
-a better state — inferred from context, never asked).
+a better state — inferred from context, never asked). The first pick in your output
+is your top recommendation; the others are runner-ups the user may flip to.
 
 PERSPECTIVE DEFAULT: When the subject of a situation is ambiguous (e.g. "they cheated,"
 "they hurt me," "they left"), always assume the user is the affected or wronged party
@@ -662,12 +663,32 @@ situation reasonably well, pick it over an older candidate whose lyric is "a sli
 better mirror." The user benefits more from a current, shareable song than from a
 marginally-better classic.
 
-Output a single JSON object with no other text:
+Output a single JSON object with no other text. The "picks" array contains every
+candidate ranked from best to worst, with picks[0] being your strongest match.
+Each pick must satisfy ALL the rules above (verbatim key_lyric, specific
+iso_reasoning, distinguishing-element test, perspective default):
+
 {
-  "song_title": "...",
-  "artist": "...",
-  "key_lyric": "exact verbatim line from the provided lyrics",
-  "iso_reasoning": "..."
+  "picks": [
+    {
+      "song_title": "...",
+      "artist": "...",
+      "key_lyric": "exact verbatim line from the provided lyrics",
+      "iso_reasoning": "..."
+    },
+    {
+      "song_title": "...",
+      "artist": "...",
+      "key_lyric": "exact verbatim line from the provided lyrics",
+      "iso_reasoning": "..."
+    },
+    {
+      "song_title": "...",
+      "artist": "...",
+      "key_lyric": "exact verbatim line from the provided lyrics",
+      "iso_reasoning": "..."
+    }
+  ]
 }
 """
 
@@ -880,7 +901,10 @@ def fetch_lyrics(song_title: str, artist: str) -> str | None:
     return None
 
 
-def select_song(user_prompt: str, candidates_with_lyrics: list[dict]) -> dict:
+def select_song(user_prompt: str, candidates_with_lyrics: list[dict]) -> list[dict]:
+    """Rank candidates from best to worst. Returns a list of pick dicts, each
+    with {song_title, artist, key_lyric, iso_reasoning}. picks[0] is the top
+    recommendation; the rest are runner-ups the user can flip to via skip."""
     lyrics_block = ""
     for i, c in enumerate(candidates_with_lyrics, 1):
         lyrics_block += f"\n\n--- Candidate {i}: {c['song_title']} by {c['artist']} ---\n"
@@ -897,7 +921,24 @@ def select_song(user_prompt: str, candidates_with_lyrics: list[dict]) -> dict:
         temperature=0.3,
         response_format={"type": "json_object"},
     )
-    return _extract_json(resp.choices[0].message.content)
+    parsed = _extract_json(resp.choices[0].message.content)
+    if isinstance(parsed, dict) and isinstance(parsed.get("picks"), list):
+        picks = parsed["picks"]
+    elif isinstance(parsed, list):
+        picks = parsed
+    elif isinstance(parsed, dict) and "song_title" in parsed:
+        # Backward-compat: model returned a single-pick object.
+        picks = [parsed]
+    else:
+        picks = []
+    # Keep only well-shaped picks.
+    return [
+        p for p in picks
+        if isinstance(p, dict)
+        and p.get("song_title")
+        and p.get("artist")
+        and p.get("key_lyric")
+    ]
 
 
 def lookup_itunes_track(song_title: str, artist: str) -> dict:
@@ -986,41 +1027,72 @@ def recommend(
     if not candidates_with_lyrics:
         raise ValueError("Could not fetch lyrics for any candidates.")
 
-    print("Selecting best match...")
-    song = select_song(user_prompt, candidates_with_lyrics)
+    print("Ranking candidates (top match + runner-ups)...")
+    picks = select_song(user_prompt, candidates_with_lyrics)
 
-    # Find the chosen candidate's lyrics (for the read-along panel on the frontend).
-    # Match by title+artist; fall back to None when the chosen song has no lyrics
-    # (instrumental or missing source).
-    chosen_lyrics = next(
-        (c["lyrics"] for c in candidates_with_lyrics
-         if c["song_title"] == song["song_title"] and c["artist"] == song["artist"]),
-        None,
-    )
-    plain_lyrics = (
-        chosen_lyrics
-        if chosen_lyrics and chosen_lyrics != INSTRUMENTAL_MARKER
-        else None
-    )
+    # Drop any picks whose song_title+artist doesn't match a candidate (model
+    # hallucination), and de-dup while preserving order.
+    candidate_map = {
+        (c["song_title"].strip().lower(), c["artist"].strip().lower()): c
+        for c in candidates_with_lyrics
+    }
+    seen: set = set()
+    aligned_picks: list[dict] = []
+    for p in picks:
+        key = (p["song_title"].strip().lower(), p["artist"].strip().lower())
+        if key in seen or key not in candidate_map:
+            continue
+        seen.add(key)
+        aligned_picks.append(p)
 
-    # ── Parallel: one-liner generation + iTunes lookup ──
-    # These are independent — both depend only on `song`, not on each other.
-    # Running them concurrently saves ~500ms-1s per request.
-    print("Writing one-liner + fetching iTunes assets (parallel)...")
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
-        oneliner_future = ex.submit(generate_oneliner, user_prompt, song)
-        itunes_future = ex.submit(lookup_itunes_track, song["song_title"], song["artist"])
-        oneliner = oneliner_future.result()
-        itunes_track = itunes_future.result()
+    # Fallback: if the model returned nothing usable, treat candidates_with_lyrics
+    # directly as picks (no key_lyric — selection will be skipped for these).
+    if not aligned_picks:
+        raise ValueError("Selection step returned no valid picks.")
+
+    # Attach plain_lyrics to each pick from its matching candidate.
+    def _plain_lyrics_for(pick: dict) -> str | None:
+        key = (pick["song_title"].strip().lower(), pick["artist"].strip().lower())
+        c = candidate_map.get(key)
+        if not c:
+            return None
+        lyr = c.get("lyrics")
+        return lyr if lyr and lyr != INSTRUMENTAL_MARKER else None
+
+    # ── Parallel: one-liner + iTunes lookup for ALL picks ──
+    # Three picks × 2 calls each = 6 tasks; all independent and IO/LLM-bound,
+    # so wall-clock is roughly the slowest single one-liner (~1–2s), not 6×.
+    print(f"Writing one-liners + fetching iTunes assets for {len(aligned_picks)} pick(s) (parallel)...")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(2 * len(aligned_picks), 1)) as ex:
+        oneliner_futures = [
+            ex.submit(generate_oneliner, user_prompt, p) for p in aligned_picks
+        ]
+        itunes_futures = [
+            ex.submit(lookup_itunes_track, p["song_title"], p["artist"])
+            for p in aligned_picks
+        ]
+        oneliners = [f.result() for f in oneliner_futures]
+        itunes_tracks = [f.result() for f in itunes_futures]
+
+    def _pick_payload(p: dict, oneliner: str, itunes_track: dict) -> dict:
+        return {
+            "one_liner": oneliner,
+            "song_title": p["song_title"],
+            "artist": p["artist"],
+            "key_lyric": p["key_lyric"],
+            "iso_reasoning": p.get("iso_reasoning", ""),
+            "itunes_track": itunes_track,
+            "plain_lyrics": _plain_lyrics_for(p),
+        }
+
+    payloads = [
+        _pick_payload(p, ol, it)
+        for p, ol, it in zip(aligned_picks, oneliners, itunes_tracks)
+    ]
 
     return {
-        "one_liner": oneliner,
-        "song_title": song["song_title"],
-        "artist": song["artist"],
-        "key_lyric": song["key_lyric"],
-        "iso_reasoning": song["iso_reasoning"],
-        "itunes_track": itunes_track,
-        "plain_lyrics": plain_lyrics,
+        "primary_pick": payloads[0],
+        "alternate_picks": payloads[1:],
         "safety": False,
     }
 
@@ -1040,9 +1112,15 @@ if __name__ == "__main__":
         if result.get("safety"):
             print(f"\n{result['message']}")
         else:
-            print(f"\n{result['one_liner']}\n")
-            print(f"{result['song_title']} — {result['artist']}")
-            print(f"\n\"{result['key_lyric']}\"")
-            print(f"\n[{result['iso_reasoning']}]")
-            used_songs.append(f"{result['song_title']} by {result['artist']}")
+            primary = result["primary_pick"]
+            print(f"\n{primary['one_liner']}\n")
+            print(f"{primary['song_title']} — {primary['artist']}")
+            print(f"\n\"{primary['key_lyric']}\"")
+            print(f"\n[{primary['iso_reasoning']}]")
+            alternates = result.get("alternate_picks", [])
+            if alternates:
+                print("\n— runner-ups (for skip) —")
+                for alt in alternates:
+                    print(f"  • {alt['song_title']} — {alt['artist']}")
+            used_songs.append(f"{primary['song_title']} by {primary['artist']}")
         print("\n" + "─" * 50)
