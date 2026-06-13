@@ -20,6 +20,22 @@ load_dotenv()
 from engine import recommend  # noqa: E402
 import db  # noqa: E402
 
+# Language detection (analytics-only — never used to gate user-facing behavior).
+# DetectorFactory.seed makes detect() deterministic across runs for reproducible
+# analytics; a non-deterministic result on a 2-word prompt is acceptable but a
+# stable one is nicer to query against.
+try:
+    from langdetect import detect as _langdetect, DetectorFactory as _LDF
+    _LDF.seed = 0
+    def _detect_language(text: str) -> str | None:
+        try:
+            return _langdetect(text)
+        except Exception:
+            return None
+except ImportError:  # pragma: no cover — production should always have it
+    def _detect_language(text: str) -> str | None:
+        return None
+
 app = Flask(__name__, static_folder="static")
 CORS(app)
 
@@ -273,8 +289,10 @@ def api_recommend():
             result=full_pick,
             user_agent=request.headers.get("User-Agent"),
         )
+        db.set_language(pick_rec_id, detected_lang)
         return full_pick
 
+    detected_lang = _detect_language(prompt)
     primary_full = _hydrate_pick(result["primary_pick"])
     alternate_fulls = [_hydrate_pick(p) for p in result.get("alternate_picks", [])]
 
@@ -321,6 +339,29 @@ def api_event():
     if not event_type:
         return jsonify({"ok": False, "error": "missing event_type"}), 400
     events.append({"recommendation_id": rec_id, "event_type": event_type})
+    db.save_event(
+        recommendation_id=rec_id,
+        session_id=session_id,
+        event_type=event_type,
+    )
+    return jsonify({"ok": True})
+
+
+@app.route("/api/reaction", methods=["POST"])
+def api_reaction():
+    """Record 👍 / 👎 / cleared reaction on a recommendation.
+    value: 1 = helped, -1 = didn't help, 0 = clear. Auth-optional in Ship 1."""
+    data = request.get_json(silent=True) or {}
+    rec_id = data.get("recommendation_id")
+    raw_value = data.get("value")
+    session_id = data.get("session_id")
+    if not rec_id:
+        return jsonify({"ok": False, "error": "missing recommendation_id"}), 400
+    if raw_value not in (1, -1, 0):
+        return jsonify({"ok": False, "error": "value must be 1, -1, or 0"}), 400
+    stored_value = raw_value if raw_value in (1, -1) else None
+    event_type = {1: "reaction_up", -1: "reaction_down", 0: "reaction_clear"}[raw_value]
+    db.set_reaction(rec_id, stored_value)
     db.save_event(
         recommendation_id=rec_id,
         session_id=session_id,

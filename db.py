@@ -92,6 +92,11 @@ def init_db() -> None:
                 CREATE INDEX IF NOT EXISTS idx_rec_created ON recommendations (created_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_rec_category ON recommendations (category);
 
+                -- Phase 6 additions: reaction signal + analytics-only language tag.
+                -- Idempotent so multiple boots are safe; nullable so historical rows stay valid.
+                ALTER TABLE recommendations ADD COLUMN IF NOT EXISTS helped SMALLINT;
+                ALTER TABLE recommendations ADD COLUMN IF NOT EXISTS detected_language TEXT;
+
                 CREATE TABLE IF NOT EXISTS events (
                     id                BIGSERIAL PRIMARY KEY,
                     recommendation_id UUID,
@@ -178,3 +183,35 @@ def save_event(
             conn.commit()
     except Exception as e:
         print(f"db: save_event failed: {type(e).__name__}: {e}")
+
+
+def set_reaction(rec_id: str, value: int | None) -> None:
+    """Set the user's 👍/👎 reaction on a recommendation. value: 1, -1, or None to clear."""
+    if _pool is None:
+        return
+    try:
+        with _conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE recommendations SET helped = %s WHERE id = %s",
+                    (value, rec_id),
+                )
+            conn.commit()
+    except Exception as e:
+        print(f"db: set_reaction failed: {type(e).__name__}: {e}")
+
+
+def set_language(rec_id: str, lang: str | None) -> None:
+    """Persist the langdetect result against a recommendation. Analytics only."""
+    if _pool is None or not lang:
+        return
+    try:
+        with _conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE recommendations SET detected_language = %s WHERE id = %s",
+                    (lang, rec_id),
+                )
+            conn.commit()
+    except Exception as e:
+        print(f"db: set_language failed: {type(e).__name__}: {e}")
