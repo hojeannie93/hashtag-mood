@@ -357,6 +357,10 @@ def api_recommend():
         sessions.setdefault(session_id, []).append(
             f"{pick['song_title']} by {pick['artist']}"
         )
+        # Always save with user_id=NULL — even for already-signed-in users.
+        # The journal is now an explicit-save list: a song doesn't land in
+        # there until the user taps "save to journal". This avoids the
+        # alternates the user never even saw silently appearing.
         db.save_recommendation(
             rec_id=pick_rec_id,
             session_id=session_id,
@@ -364,7 +368,7 @@ def api_recommend():
             category=category,
             result=full_pick,
             user_agent=request.headers.get("User-Agent"),
-            user_id=auth_user_id,
+            user_id=None,
         )
         db.set_language(pick_rec_id, detected_lang)
         return full_pick
@@ -582,6 +586,24 @@ def api_journal_patch(rec_id):
     if not ok:
         return jsonify({"ok": False, "error": "not found"}), 404
     return jsonify({"ok": True, "notes": notes})
+
+
+@app.route("/api/journal/<rec_id>/save", methods=["POST"])
+def api_journal_save(rec_id):
+    """Explicit save-to-journal action. Claims this specific recommendation
+    row for the signed-in user. Idempotent — re-claiming a row the user
+    already owns is a no-op success.
+
+    The same DB primitive (claim_recommendation) is used by /api/auth/migrate
+    for the post-signup handoff, so behavior stays consistent."""
+    auth_user = _current_user(request)
+    if not auth_user or not auth_user.get("id"):
+        return jsonify({"ok": False, "error": "not authenticated"}), 401
+    user_id = auth_user["id"]
+    claimed = db.claim_recommendation(rec_id, user_id)
+    # claim_recommendation only matches user_id IS NULL rows. If the user
+    # already owns it (re-tap), the row stays untouched and we still return ok.
+    return jsonify({"ok": True, "claimed": claimed})
 
 
 @app.route("/api/journal/<rec_id>", methods=["DELETE"])
