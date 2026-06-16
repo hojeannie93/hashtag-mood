@@ -817,6 +817,128 @@
       text-transform: uppercase;
     }
 
+    /* ── Auth modal (signup gate) ──────────────────────────────────────── */
+
+    .auth-modal {
+      position: fixed; inset: 0; z-index: 110;
+      display: flex; align-items: center; justify-content: center;
+      padding: 1.25rem;
+    }
+    .auth-modal[hidden] { display: none; }
+    .auth-modal-backdrop {
+      position: absolute; inset: 0;
+      background: rgba(61, 53, 40, 0.55);
+      backdrop-filter: blur(3px);
+      animation: shareFadeIn 0.22s ease forwards;
+    }
+    .auth-modal-panel {
+      position: relative;
+      background: var(--cream);
+      width: 100%;
+      max-width: 380px;
+      padding: 1.85rem 1.5rem 1.65rem;
+      border-radius: 22px;
+      box-shadow: 0 14px 48px rgba(0, 0, 0, 0.22);
+      animation: authPopIn 0.28s cubic-bezier(0.2, 0.9, 0.3, 1) forwards;
+      text-align: center;
+    }
+    @keyframes authPopIn {
+      from { opacity: 0; transform: scale(0.94) translateY(8px); }
+      to   { opacity: 1; transform: scale(1) translateY(0); }
+    }
+    .auth-modal-close {
+      position: absolute;
+      top: 0.75rem; right: 0.95rem;
+      width: 28px; height: 28px;
+      border: none; background: transparent;
+      color: var(--brown);
+      opacity: 0.5;
+      font-size: 1.05rem;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .auth-modal-close:hover { opacity: 0.85; }
+    .auth-modal-emoji {
+      font-size: 1.8rem;
+      margin-bottom: 0.55rem;
+    }
+    .auth-modal-headline {
+      font-family: 'Cormorant Garamond', serif;
+      font-style: italic;
+      font-size: 1.6rem;
+      color: var(--brown);
+      line-height: 1.15;
+      margin-bottom: 0.3rem;
+    }
+    .auth-modal-subhead {
+      font-family: 'Quicksand', sans-serif;
+      font-size: 0.92rem;
+      color: var(--forest);
+      opacity: 0.75;
+      margin-bottom: 1.5rem;
+      letter-spacing: 0.01em;
+    }
+    .auth-modal-buttons {
+      display: flex; flex-direction: column;
+      gap: 0.6rem;
+    }
+    .auth-btn {
+      display: flex; align-items: center; justify-content: center;
+      gap: 0.65rem;
+      width: 100%;
+      padding: 0.78rem 1rem;
+      border-radius: 12px;
+      font-family: 'Quicksand', sans-serif;
+      font-size: 0.97rem;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      cursor: pointer;
+      transition: transform 0.12s ease, box-shadow 0.18s ease, background 0.18s ease;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .auth-btn:active { transform: scale(0.97); }
+    .auth-btn-icon { width: 18px; height: 18px; flex-shrink: 0; }
+    /* Google brand guidelines: white background, color G logo, dark text */
+    .auth-btn-google {
+      background: #FFFFFF;
+      color: #1F1F1F;
+      border: 1.5px solid rgba(0, 0, 0, 0.1);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    }
+    .auth-btn-google:hover {
+      background: #FAFAFA;
+      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.08);
+    }
+    /* Apple brand guidelines: black background, white Apple logo, white text */
+    .auth-btn-apple {
+      background: #000000;
+      color: #FFFFFF;
+      border: 1.5px solid #000000;
+    }
+    .auth-btn-apple:hover {
+      background: #1a1a1a;
+      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.15);
+    }
+
+    /* Toast (signup success, etc.) */
+    .auth-toast {
+      position: fixed;
+      left: 50%; bottom: 5rem;
+      transform: translateX(-50%);
+      background: rgba(61, 79, 53, 0.92);
+      color: var(--cream);
+      padding: 0.7rem 1.2rem;
+      border-radius: 28px;
+      font-family: 'Quicksand', sans-serif;
+      font-size: 0.9rem;
+      letter-spacing: 0.02em;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+      z-index: 130;
+      animation: authToastIn 0.32s ease forwards, authToastOut 0.32s ease 2.4s forwards;
+    }
+    @keyframes authToastIn  { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
+    @keyframes authToastOut { to   { opacity: 0; transform: translate(-50%, -8px); } }
+
     /* ── Share sheet (bottom sheet) ────────────────────────────────────── */
 
     .share-sheet {
@@ -1156,6 +1278,37 @@
     </div>
   </div>
 
+  <!-- ── SIGNUP MODAL (Google + Apple) ────────────────────────────────────
+       Anonymous users see this when they tap save-card, share, or 👍. We own
+       the modal entirely — Clerk's hosted UI is never mounted; we just call
+       its programmatic OAuth API from each button. -->
+  <div id="auth-modal" class="auth-modal" hidden>
+    <div class="auth-modal-backdrop" id="auth-backdrop"></div>
+    <div class="auth-modal-panel" role="dialog" aria-modal="true" aria-label="Sign in to save">
+      <button class="auth-modal-close" id="auth-close" aria-label="Close">✕</button>
+      <div class="auth-modal-emoji" aria-hidden="true">🎵</div>
+      <div class="auth-modal-headline">Keep this song.</div>
+      <div class="auth-modal-subhead">Start your mood journal — one tap, no password.</div>
+      <div class="auth-modal-buttons">
+        <button class="auth-btn auth-btn-google" id="auth-google" type="button">
+          <svg class="auth-btn-icon" viewBox="0 0 18 18" aria-hidden="true">
+            <path fill="#4285F4" d="M17.64 9.205c0-.639-.057-1.252-.164-1.841H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/>
+            <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"/>
+            <path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/>
+            <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/>
+          </svg>
+          Continue with Google
+        </button>
+        <button class="auth-btn auth-btn-apple" id="auth-apple" type="button">
+          <svg class="auth-btn-icon" viewBox="0 0 18 18" aria-hidden="true">
+            <path fill="#fff" d="M14.94 6.27c-.1.08-1.86 1.06-1.86 3.26 0 2.54 2.24 3.44 2.3 3.46-.02.06-.36 1.18-1.14 2.34-.7 1.02-1.42 2.04-2.52 2.04-1.1 0-1.38-.66-2.64-.66-1.24 0-1.68.68-2.68.68-1 0-1.7-.94-2.52-2.1-1.06-1.5-1.92-3.84-1.92-6.06 0-3.56 2.32-5.44 4.6-5.44 1.22 0 2.22.8 2.98.8.72 0 1.86-.86 3.24-.86.52 0 2.36.04 3.16 1.84zm-3.74-3.38c.58-.68.98-1.62.98-2.56 0-.14 0-.28-.04-.4-.94.04-2.06.62-2.74 1.4-.52.6-1.02 1.54-1.02 2.5 0 .14.02.28.04.34.06.02.16.04.26.04.84 0 1.9-.56 2.52-1.32z"/>
+          </svg>
+          Continue with Apple
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- ── SAFETY ────────────────────────────────────────────────────────── -->
   <div id="screen-safety" class="screen">
     <div class="card safety-card">
@@ -1188,6 +1341,117 @@
     let currentPrompt = '';
     let currentRecCategory = null;
     let skipFetchInFlight = false;
+
+    // ── Clerk (auth) — initialized lazily on page load ─────────────────
+    let clerkReady = false;
+    let clerkInitPromise = null;
+
+    async function initClerk() {
+      try {
+        const cfg = await fetch(`${API_BASE}/api/config`).then(r => r.ok ? r.json() : ({}));
+        const pk = cfg.clerk_publishable_key;
+        if (!pk) return;  // Anon-only mode when no key configured
+        await new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.async = true;
+          s.crossOrigin = 'anonymous';
+          s.dataset.clerkPublishableKey = pk;
+          s.src = 'https://cdn.jsdelivr.net/npm/@clerk/clerk-js@5/dist/clerk.browser.js';
+          s.onload = resolve;
+          s.onerror = reject;
+          document.head.appendChild(s);
+        });
+        await window.Clerk.load();
+        clerkReady = true;
+        window.Clerk.addListener(handleClerkAuthChange);
+      } catch (e) {
+        console.warn('clerk init failed (falling back to anon-only):', e);
+      }
+    }
+
+    function isAuthed() {
+      return !!(clerkReady && window.Clerk?.user);
+    }
+
+    async function getAuthToken() {
+      if (!isAuthed()) return null;
+      try { return await window.Clerk.session.getToken(); } catch (e) { return null; }
+    }
+
+    async function authedFetch(url, options = {}) {
+      const token = await getAuthToken();
+      const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      return fetch(url, { ...options, headers });
+    }
+
+    function openSignIn() {
+      // No-op if Clerk isn't configured (e.g. local dev without keys). The
+      // caller's gateAnon falls through to running the action anonymously.
+      if (!clerkReady) return false;
+      $('auth-modal').hidden = false;
+      return true;
+    }
+
+    function closeSignIn() {
+      $('auth-modal').hidden = true;
+    }
+
+    async function gateAnon(originalAction) {
+      if (isAuthed()) return originalAction();
+      const opened = openSignIn();
+      if (!opened) return originalAction();  // Clerk disabled — let action through
+      // Action is NOT auto-re-run after signup. User re-taps deliberately.
+    }
+
+    async function signInWithGoogle() {
+      if (!clerkReady) return;
+      try {
+        const signIn = await window.Clerk.client.signIn.create({ strategy: 'oauth_google' });
+        await signIn.authenticateWithRedirect({
+          redirectUrl: window.location.href,
+          redirectUrlComplete: window.location.href,
+        });
+      } catch (e) { console.error('google signin failed:', e); }
+    }
+
+    async function signInWithApple() {
+      if (!clerkReady) return;
+      try {
+        const signIn = await window.Clerk.client.signIn.create({ strategy: 'oauth_apple' });
+        await signIn.authenticateWithRedirect({
+          redirectUrl: window.location.href,
+          redirectUrlComplete: window.location.href,
+        });
+      } catch (e) { console.error('apple signin failed:', e); }
+    }
+
+    async function handleClerkAuthChange(resources) {
+      if (!resources?.user) return;
+      try {
+        const token = await getAuthToken();
+        if (!token) return;
+        await fetch(`${API_BASE}/api/auth/migrate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ anon_id: sessionId }),
+        });
+        closeSignIn();
+        showAuthToast('saved to your journal ✓');
+      } catch (e) { console.warn('migrate failed:', e); }
+    }
+
+    function showAuthToast(msg) {
+      const existing = document.querySelector('.auth-toast');
+      if (existing) existing.remove();
+      const t = document.createElement('div');
+      t.className = 'auth-toast';
+      t.textContent = msg;
+      document.body.appendChild(t);
+      setTimeout(() => t.remove(), 3000);
+    }
+
+    clerkInitPromise = initClerk();
 
     // ── DOM ────────────────────────────────────────────────────────────
     const $ = (id) => document.getElementById(id);
@@ -1236,9 +1500,8 @@
       showScreen('screen-loading');
 
       try {
-        const resp = await fetch(`${API_BASE}/api/recommend`, {
+        const resp = await authedFetch(`${API_BASE}/api/recommend`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             prompt,
             session_id: sessionId,
@@ -1665,7 +1928,7 @@
       document.body.appendChild(t);
       setTimeout(() => t.remove(), 2200);
     }
-    $('share-btn').addEventListener('click', openShareSheet);
+    $('share-btn').addEventListener('click', () => gateAnon(openShareSheet));
     $('share-backdrop').addEventListener('click', closeShareSheet);
     $('share-cancel').addEventListener('click', closeShareSheet);
 
@@ -1761,8 +2024,7 @@
     // ── Save card ──────────────────────────────────────────────────────
     // On mobile: open the share sheet so the user can "Save Image" (iOS) or
     // "Save to Gallery" (Android). On desktop: trigger a real download.
-    $('save-btn').addEventListener('click', async () => {
-      if (!currentResult) return;
+    async function performSaveCard() {
       const btn = $('save-btn');
       btn.textContent = 'rendering…';
       btn.disabled = true;
@@ -1803,6 +2065,11 @@
         btn.textContent = 'save card';
         btn.disabled = false;
       }
+    }
+
+    $('save-btn').addEventListener('click', () => {
+      if (!currentResult) return;
+      gateAnon(performSaveCard);
     });
 
     // ── Try again ──────────────────────────────────────────────────────
@@ -1875,9 +2142,8 @@
       skipFetchInFlight = true;
       updateNavButtonsState();
       try {
-        const resp = await fetch(`${API_BASE}/api/recommend`, {
+        const resp = await authedFetch(`${API_BASE}/api/recommend`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             prompt: currentPrompt,
             session_id: sessionId,
@@ -1934,9 +2200,8 @@
     function logEvent(type, recIdOverride) {
       const recId = recIdOverride || (currentResult && currentResult.recommendation_id);
       if (!recId) return;
-      fetch(`${API_BASE}/api/event`, {
+      authedFetch(`${API_BASE}/api/event`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           recommendation_id: recId,
           session_id: sessionId,
@@ -1964,9 +2229,8 @@
       $('reaction-up').classList.toggle('is-active', currentReaction === 1);
       $('reaction-down').classList.toggle('is-active', currentReaction === -1);
       try {
-        await fetch(`${API_BASE}/api/reaction`, {
+        await authedFetch(`${API_BASE}/api/reaction`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             recommendation_id: currentResult.recommendation_id,
             session_id: sessionId,
@@ -1974,10 +2238,19 @@
           }),
         });
       } catch (e) { /* analytics — non-blocking */ }
+      // Soft prompt: reaction is already logged. If anon, open signup modal
+      // afterward — user can dismiss; the reaction stays in the anon session.
+      if (!isAuthed() && newValue !== 0) openSignIn();
     }
 
     $('reaction-up').addEventListener('click', () => handleReaction(1));
     $('reaction-down').addEventListener('click', () => handleReaction(-1));
+
+    // ── Auth modal handlers ────────────────────────────────────────────
+    $('auth-close').addEventListener('click', closeSignIn);
+    $('auth-backdrop').addEventListener('click', closeSignIn);
+    $('auth-google').addEventListener('click', signInWithGoogle);
+    $('auth-apple').addEventListener('click', signInWithApple);
   </script>
 </body>
 </html>

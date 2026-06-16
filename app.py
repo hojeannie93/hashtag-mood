@@ -20,6 +20,70 @@ load_dotenv()
 from engine import recommend  # noqa: E402
 import db  # noqa: E402
 
+# Clerk authentication. Optional at boot — if CLERK_SECRET_KEY is missing,
+# _current_user() returns None for every request and every endpoint that
+# branches on auth state falls back to its anon path. Lets the app run
+# locally without Clerk credentials configured.
+CLERK_SECRET_KEY = os.environ.get("CLERK_SECRET_KEY")
+CLERK_AUTHORIZED_PARTIES = [
+    p.strip() for p in os.environ.get("CLERK_AUTHORIZED_PARTIES", "").split(",")
+    if p.strip()
+]
+_clerk_sdk = None
+if CLERK_SECRET_KEY:
+    try:
+        from clerk_backend_api import (  # noqa: E402
+            Clerk as _Clerk,
+            authenticate_request as _clerk_authenticate_request,
+            AuthenticateRequestOptions as _ClerkAuthOpts,
+        )
+        _clerk_sdk = _Clerk(bearer_auth=CLERK_SECRET_KEY)
+        print("clerk: SDK ready")
+    except ImportError:
+        print("clerk: clerk-backend-api not installed — auth disabled")
+        _clerk_sdk = None
+
+def _current_user(req) -> dict | None:
+    """Return {id, email} for an authenticated request, or None for anon.
+    Tolerant — endpoints that work for both anon and authed users branch on the result.
+    Looks up primary_provider lazily via _get_primary_provider when needed."""
+    if not _clerk_sdk:
+        return None
+    try:
+        state = _clerk_authenticate_request(
+            req,
+            _ClerkAuthOpts(
+                secret_key=CLERK_SECRET_KEY,
+                authorized_parties=CLERK_AUTHORIZED_PARTIES or None,
+            ),
+        )
+        if not state.is_signed_in or not state.payload:
+            return None
+        return {
+            "id": state.payload.get("sub"),
+            "email": state.payload.get("email"),
+        }
+    except Exception as e:
+        print(f"clerk auth failed: {type(e).__name__}: {e}")
+        return None
+
+def _get_primary_provider(user_id: str) -> str | None:
+    """Resolve the OAuth provider the user signed up with. One Clerk Backend API
+    call. Returns 'google' / 'apple' / None. Called from /api/auth/migrate only."""
+    if not _clerk_sdk or not user_id:
+        return None
+    try:
+        user = _clerk_sdk.users.get(user_id=user_id)
+        accounts = getattr(user, "external_accounts", None) or []
+        for ea in accounts:
+            provider = getattr(ea, "provider", None) or ""
+            if provider.startswith("oauth_"):
+                return provider[len("oauth_"):]
+        return None
+    except Exception as e:
+        print(f"clerk user lookup failed: {type(e).__name__}: {e}")
+        return None
+
 # Language detection (analytics-only — never used to gate user-facing behavior).
 # DetectorFactory.seed makes detect() deterministic across runs for reproducible
 # analytics; a non-deterministic result on a 2-word prompt is acceptable but a
@@ -225,6 +289,8 @@ def api_recommend():
     used_songs = data.get("used_songs") or sessions.get(session_id, [])
     raw_category = (data.get("category") or "").strip().lower()
     category = raw_category if raw_category in VALID_CATEGORIES else None
+    auth_user = _current_user(request)
+    auth_user_id = auth_user["id"] if auth_user else None
 
     if not prompt:
         return jsonify({"error": "empty prompt"}), 400
@@ -243,6 +309,7 @@ def api_recommend():
             category=category,
             result=result,
             user_agent=request.headers.get("User-Agent"),
+            user_id=auth_user_id,
         )
         return jsonify({"safety": True, "message": result["message"]})
 
@@ -288,6 +355,7 @@ def api_recommend():
             category=category,
             result=full_pick,
             user_agent=request.headers.get("User-Agent"),
+            user_id=auth_user_id,
         )
         db.set_language(pick_rec_id, detected_lang)
         return full_pick
@@ -336,6 +404,8 @@ def api_event():
     rec_id = data.get("recommendation_id")
     event_type = data.get("event_type")
     session_id = data.get("session_id")
+    auth_user = _current_user(request)
+    user_id = auth_user["id"] if auth_user else None
     if not event_type:
         return jsonify({"ok": False, "error": "missing event_type"}), 400
     events.append({"recommendation_id": rec_id, "event_type": event_type})
@@ -343,6 +413,7 @@ def api_event():
         recommendation_id=rec_id,
         session_id=session_id,
         event_type=event_type,
+        user_id=user_id,
     )
     return jsonify({"ok": True})
 
@@ -350,11 +421,13 @@ def api_event():
 @app.route("/api/reaction", methods=["POST"])
 def api_reaction():
     """Record 👍 / 👎 / cleared reaction on a recommendation.
-    value: 1 = helped, -1 = didn't help, 0 = clear. Auth-optional in Ship 1."""
+    value: 1 = helped, -1 = didn't help, 0 = clear. Auth-optional."""
     data = request.get_json(silent=True) or {}
     rec_id = data.get("recommendation_id")
     raw_value = data.get("value")
     session_id = data.get("session_id")
+    auth_user = _current_user(request)
+    user_id = auth_user["id"] if auth_user else None
     if not rec_id:
         return jsonify({"ok": False, "error": "missing recommendation_id"}), 400
     if raw_value not in (1, -1, 0):
@@ -366,8 +439,45 @@ def api_reaction():
         recommendation_id=rec_id,
         session_id=session_id,
         event_type=event_type,
+        user_id=user_id,
     )
     return jsonify({"ok": True})
+
+
+@app.route("/api/config")
+def api_config():
+    """Surface non-secret config to the SPA. The publishable key is meant to be
+    public (Clerk's docs call it 'pk_test_...' / 'pk_live_...') — it identifies
+    the Clerk instance but doesn't authorize backend access.
+    Accepts NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY as a fallback because Clerk's
+    quickstart docs use that name and people often copy it verbatim."""
+    pk = (
+        os.environ.get("CLERK_PUBLISHABLE_KEY")
+        or os.environ.get("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY")
+        or ""
+    )
+    return jsonify({"clerk_publishable_key": pk})
+
+
+@app.route("/api/auth/migrate", methods=["POST"])
+def api_auth_migrate():
+    """Claim every anonymous entry for the now-signed-in user. Called once by
+    the frontend right after the Clerk auth listener fires."""
+    auth_user = _current_user(request)
+    if not auth_user or not auth_user.get("id"):
+        return jsonify({"ok": False, "error": "not authenticated"}), 401
+    data = request.get_json(silent=True) or {}
+    anon_id = (data.get("anon_id") or "").strip() or None
+    user_id = auth_user["id"]
+    provider = _get_primary_provider(user_id)
+    db.upsert_user(
+        user_id=user_id,
+        email=auth_user.get("email"),
+        primary_provider=provider,
+        signup_anon_id=anon_id,
+    )
+    moved = db.migrate_anon_to_user(user_id, anon_id) if anon_id else {"recommendations": 0, "events": 0}
+    return jsonify({"ok": True, "migrated": moved, "primary_provider": provider})
 
 
 # ── Synced lyrics via Whisper ─────────────────────────────────────────────────
