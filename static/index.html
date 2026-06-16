@@ -960,6 +960,185 @@
       filter: saturate(0.85);
     }
 
+    /* ── Journal row expanded panel (inline notes / replay / delete) ───── */
+    .journal-row-expand {
+      grid-column: 1 / -1;
+      display: flex;
+      flex-direction: column;
+      gap: 0.55rem;
+      padding-top: 0.75rem;
+      border-top: 1px solid rgba(61, 53, 40, 0.08);
+      margin-top: 0.15rem;
+    }
+    .journal-row-expand[hidden] { display: none; }
+    .journal-notes {
+      width: 100%;
+      min-height: 64px;
+      resize: vertical;
+      background: var(--cream);
+      border: 1px solid rgba(61, 53, 40, 0.15);
+      border-radius: 10px;
+      padding: 0.65rem 0.85rem;
+      font-family: 'Cormorant Garamond', serif;
+      font-style: italic;
+      font-size: 1rem;
+      color: var(--brown);
+      line-height: 1.45;
+      outline: none;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .journal-notes:focus {
+      border-color: var(--sage);
+      box-shadow: 0 0 0 3px rgba(168, 187, 160, 0.22);
+    }
+    .journal-row-actions {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .row-action {
+      flex: 1;
+      min-width: 0;
+      padding: 0.55rem 0.7rem;
+      border-radius: 10px;
+      font-family: 'Quicksand', sans-serif;
+      font-size: 0.82rem;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      cursor: pointer;
+      border: 1.5px solid transparent;
+      transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease, border-color 0.15s ease;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .row-action:active { transform: scale(0.96); }
+    .row-replay {
+      background: var(--cream);
+      color: var(--forest);
+      border-color: rgba(61, 79, 53, 0.25);
+    }
+    .row-replay:hover { background: rgba(168, 187, 160, 0.2); }
+    .row-save {
+      background: var(--forest);
+      color: var(--cream);
+    }
+    .row-save:hover { background: #2e4128; }
+    .row-save.is-saved { background: rgba(168, 187, 160, 0.5); color: var(--forest); }
+    .row-delete {
+      background: var(--cream);
+      color: #a04848;
+      border-color: rgba(160, 72, 72, 0.3);
+    }
+    .row-delete:hover { background: rgba(160, 72, 72, 0.08); }
+
+    .journal-row.is-expanded {
+      background: var(--cream);
+      box-shadow: 0 8px 24px rgba(61, 79, 53, 0.12);
+    }
+    .journal-row.is-removing {
+      animation: rowRemove 0.28s ease forwards;
+    }
+    @keyframes rowRemove {
+      from { opacity: 1; max-height: 600px; padding-top: 0.85rem; padding-bottom: 0.85rem; margin-bottom: 0; }
+      to   { opacity: 0; max-height: 0;     padding-top: 0;       padding-bottom: 0;       margin-bottom: -0.6rem; }
+    }
+
+    /* ── Top-right journal nav button ─────────────────────────────────── */
+    .screen-nav-btn {
+      position: fixed;
+      top: calc(env(safe-area-inset-top, 0px) + 0.85rem);
+      right: 1.1rem;
+      z-index: 50;
+      padding: 0.5rem 0.95rem;
+      min-height: 36px;
+      background: var(--warm-white);
+      color: var(--forest);
+      font-family: 'Quicksand', sans-serif;
+      font-size: 0.82rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      border: 1.5px solid rgba(168, 187, 160, 0.6);
+      border-radius: 999px;
+      cursor: pointer;
+      box-shadow: 0 4px 14px rgba(61, 79, 53, 0.08);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      transition: background 0.15s ease, transform 0.12s ease, border-color 0.15s ease;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .screen-nav-btn[hidden] { display: none; }
+    .screen-nav-btn:hover { background: var(--cream); border-color: var(--sage); }
+    .screen-nav-btn:active { transform: scale(0.96); }
+
+    /* ── Result-screen notes section (signed-in users only) ──────────── */
+    .notes-row {
+      width: 100%;
+      max-width: 420px;
+      margin: 0 0 1rem;
+      padding: 0.7rem 0.85rem;
+      background: var(--warm-white);
+      border: 1px solid rgba(255, 255, 255, 0.55);
+      border-radius: 16px;
+      box-shadow: 0 4px 14px rgba(61, 79, 53, 0.05);
+      display: flex;
+      flex-direction: column;
+      gap: 0.55rem;
+      flex-shrink: 0;
+    }
+    .notes-row[hidden] { display: none; }
+    .notes-textarea {
+      width: 100%;
+      min-height: 52px;
+      resize: none;
+      background: transparent;
+      border: none;
+      outline: none;
+      padding: 0.2rem 0.1rem;
+      font-family: 'Cormorant Garamond', serif;
+      font-style: italic;
+      font-size: 1.02rem;
+      color: var(--brown);
+      line-height: 1.45;
+    }
+    .notes-textarea::placeholder { color: rgba(61, 53, 40, 0.45); }
+    .notes-row-footer {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 0.5rem;
+      min-height: 22px;
+    }
+    .notes-saved {
+      font-family: 'Quicksand', sans-serif;
+      font-size: 0.75rem;
+      color: var(--forest);
+      opacity: 0;
+      transition: opacity 0.18s ease;
+      letter-spacing: 0.06em;
+    }
+    .notes-saved.is-flashing { opacity: 0.85; }
+    .notes-save-btn {
+      padding: 0.42rem 0.95rem;
+      background: var(--forest);
+      color: var(--cream);
+      border: none;
+      border-radius: 999px;
+      font-family: 'Quicksand', sans-serif;
+      font-size: 0.78rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      cursor: pointer;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.18s ease, background 0.15s ease, transform 0.12s ease;
+    }
+    .notes-save-btn.is-visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .notes-save-btn:hover { background: #2e4128; }
+    .notes-save-btn:active { transform: scale(0.95); }
+    .result-card.rendering ~ .notes-row { display: none !important; }
+
     /* ── Auth modal (signup gate) ──────────────────────────────────────── */
 
     .auth-modal {
@@ -1239,6 +1418,13 @@
   </div>
   <div class="grain"></div>
 
+  <!-- ── TOP-RIGHT JOURNAL NAV (signed-in only) ────────────────────────────
+       Fixed-position pill that takes the user back to their journal from
+       input or result. Hidden on the journal itself (the "+ new mood" CTA
+       already covers the inverse direction). Responsive: same affordance,
+       same hit target on mobile + desktop. -->
+  <button id="screen-nav-btn" class="screen-nav-btn" hidden type="button">your journal →</button>
+
   <!-- ── INPUT ─────────────────────────────────────────────────────────── -->
   <div id="screen-input" class="screen active">
     <div class="logo">#Mood</div>
@@ -1332,6 +1518,20 @@
         <span class="reaction-emoji" aria-hidden="true">👎</span>
       </button>
     </div>
+    <!-- Notes row — user-written reflection on this entry. Signed-in only;
+         hidden for anon users (no account to save against). Auto-saves on blur;
+         the placeholder pretext is the affordance hint. -->
+    <div class="notes-row" id="notes-row" hidden>
+      <textarea
+        id="notes-textarea"
+        class="notes-textarea"
+        placeholder="add a note about how you're feeling… (autosaves when you click away)"
+        rows="2"
+        maxlength="4000"></textarea>
+      <div class="notes-row-footer">
+        <span class="notes-saved" id="notes-saved" aria-live="polite">saved ✓</span>
+      </div>
+    </div>
     <!-- Synced lyrics panel — appears below the card when the chosen song has lyrics.
          Whisper-driven highlight kicks in 2-5s after play. Read-along works without. -->
     <div class="lyrics-panel" id="lyrics-panel" hidden>
@@ -1350,7 +1550,7 @@
       </div>
     </div>
     <div class="actions-row">
-      <button class="action-btn share-btn" id="share-btn">share ↗</button>
+      <button class="action-btn share-btn" id="save-to-journal-btn">save to journal ↗</button>
       <button class="action-btn save-btn" id="save-btn">save card</button>
     </div>
     <button class="ghost-btn" id="again-btn">Let's try a different Mood →</button>
@@ -1655,6 +1855,9 @@
     // call to finish before fetching the journal — otherwise the first journal
     // load might race the row-claim UPDATE and miss the user's first entry.
     let migratePromise = Promise.resolve();
+    // Cached result of the most-recent migrate call so the toast can be honest
+    // about whether the user's pre-signup entries actually moved.
+    let lastMigrateResult = null;
 
     async function handleClerkAuthChange(resources) {
       if (!resources?.user) return;
@@ -1662,18 +1865,34 @@
         try {
           const token = await getAuthToken();
           if (!token) return;
-          await fetch(`${API_BASE}/api/auth/migrate`, {
+          console.log('[mood] migrating anon_id=', sessionId);
+          const resp = await fetch(`${API_BASE}/api/auth/migrate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
             body: JSON.stringify({ anon_id: sessionId }),
           });
-        } catch (e) { console.warn('migrate failed:', e); }
+          if (resp.ok) {
+            lastMigrateResult = await resp.json().catch(() => null);
+            console.log('[mood] migrate response:', lastMigrateResult);
+          } else {
+            console.warn('[mood] migrate HTTP', resp.status);
+          }
+        } catch (e) { console.warn('[mood] migrate failed:', e); }
       })();
       await migratePromise;
       closeSignIn();
       if (sessionStorage.getItem(SIGNUP_FLAG)) {
         sessionStorage.removeItem(SIGNUP_FLAG);
-        showAuthToast('saved to your journal ✓');
+        const moved = lastMigrateResult?.migrated?.recommendations || 0;
+        if (moved > 0) {
+          const noun = moved === 1 ? 'song' : 'songs';
+          showAuthToast(`${moved} ${noun} saved to your journal ✓`);
+        } else {
+          // Migration claimed nothing — either there were no anon entries to
+          // claim, or the session_id was wiped between OAuth hops. Either way,
+          // don't lie. Welcome the user and let them start fresh.
+          showAuthToast('welcome — start by exploring a mood');
+        }
       }
     }
 
@@ -1696,6 +1915,16 @@
     function showScreen(id) {
       screens.forEach(s => $(s).classList.toggle('active', s === id));
       if (id !== 'screen-result') stopPreview();
+      updateScreenNavBtn(id);
+    }
+
+    // Show "your journal →" on input/result, hidden on journal/safety/loading.
+    // Only ever visible when the user is signed in.
+    function updateScreenNavBtn(activeId) {
+      const btn = $('screen-nav-btn');
+      if (!btn) return;
+      const eligible = activeId === 'screen-input' || activeId === 'screen-result';
+      btn.hidden = !(eligible && isAuthed());
     }
 
     // ── Input ──────────────────────────────────────────────────────────
@@ -1958,6 +2187,7 @@
       setPreview(d.preview_url);
       renderLyricsPanel(d.plain_lyrics);
       resetReactionUI();
+      resetNotesSection(d);
 
       // Streaming deep links — hide any service that has no URL
       const links = d.streaming_links || {};
@@ -2164,7 +2394,14 @@
       document.body.appendChild(t);
       setTimeout(() => t.remove(), 2200);
     }
-    $('share-btn').addEventListener('click', () => gateAnon(openShareSheet));
+    // "save to journal" button. For anon: gateAnon opens the OAuth modal and
+    // the migrate handler claims the just-served entry on signin. For authed:
+    // navigate to the journal (the entry is already auto-logged via user_id).
+    async function goToJournalFromResult() {
+      try { await loadJournal(); } catch (e) { /* tolerate */ }
+      showScreen('screen-journal');
+    }
+    $('save-to-journal-btn').addEventListener('click', () => gateAnon(goToJournalFromResult));
     $('share-backdrop').addEventListener('click', closeShareSheet);
     $('share-cancel').addEventListener('click', closeShareSheet);
 
@@ -2458,6 +2695,75 @@
       $('reaction-down').classList.remove('is-active');
     }
 
+    // ── Result-screen notes section ────────────────────────────────────
+    // savedNote tracks "what the server believes." UI compares textarea
+    // value against this to decide whether to show the save button.
+    let savedNote = '';
+
+    function resetNotesSection(d) {
+      const row = $('notes-row');
+      const ta = $('notes-textarea');
+      const saved = $('notes-saved');
+      // Only signed-in users get notes (no anon account to save against).
+      row.hidden = !isAuthed();
+      savedNote = (d && d.notes) || '';
+      ta.value = savedNote;
+      autoSizeNotes(ta);
+      saved.classList.remove('is-flashing');
+    }
+
+    function autoSizeNotes(ta) {
+      ta.style.height = 'auto';
+      ta.style.height = Math.max(52, ta.scrollHeight) + 'px';
+    }
+
+    async function saveResultNote() {
+      if (!currentResult || !isAuthed()) return;
+      const ta = $('notes-textarea');
+      const saved = $('notes-saved');
+      const value = ta.value.trim() || null;
+      const previousSaved = savedNote;
+      // Optimistically mark the new value as saved so a re-blur with no
+      // further changes doesn't fire a redundant PATCH.
+      savedNote = value || '';
+      try {
+        const resp = await authedFetch(`${API_BASE}/api/journal/${currentResult.recommendation_id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ notes: value }),
+        });
+        if (!resp.ok) throw new Error(`server returned ${resp.status}`);
+        currentResult.notes = savedNote;
+        const idx = journalEntries.findIndex(e => e.recommendation_id === currentResult.recommendation_id);
+        if (idx >= 0) journalEntries[idx].notes = savedNote;
+        saved.classList.add('is-flashing');
+        setTimeout(() => saved.classList.remove('is-flashing'), 1400);
+      } catch (e) {
+        // Roll back optimistic state so the next blur retries.
+        savedNote = previousSaved;
+        console.warn('save result note failed:', e);
+        showAuthToast("couldn't save note — try again");
+      }
+    }
+
+    $('notes-textarea').addEventListener('input', () => {
+      autoSizeNotes($('notes-textarea'));
+    });
+    // Auto-save on blur. The placeholder explains the contract, so no save
+    // button is needed.
+    $('notes-textarea').addEventListener('blur', () => {
+      const ta = $('notes-textarea');
+      const current = ta.value.trim() || '';
+      if (current !== savedNote) saveResultNote();
+    });
+
+    // ── Top-right journal nav button ───────────────────────────────────
+    $('screen-nav-btn').addEventListener('click', async () => {
+      try {
+        await loadJournal();
+      } catch (e) { /* tolerate */ }
+      showScreen('screen-journal');
+    });
+
     async function handleReaction(value) {
       if (!currentResult) return;
       const newValue = currentReaction === value ? 0 : value;  // tap-again clears
@@ -2507,9 +2813,10 @@
     }
 
     function renderJournalRow(entry) {
-      const row = document.createElement('button');
-      row.type = 'button';
+      const row = document.createElement('div');
       row.className = 'journal-row';
+      row.setAttribute('role', 'group');
+      row.dataset.recId = entry.recommendation_id;
       const reaction = entry.helped === 1 ? '👍' : (entry.helped === -1 ? '👎' : '');
       row.innerHTML = `
         <div class="journal-row-date">${formatJournalDate(entry.created_at)}</div>
@@ -2519,9 +2826,113 @@
           <div class="journal-row-artist">${escapeHtml(entry.artist || '')}</div>
         </div>
         <div class="journal-row-reaction" aria-label="${reaction ? 'reacted ' + reaction : 'no reaction'}">${reaction}</div>
+        <div class="journal-row-expand" hidden>
+          <textarea
+            class="journal-notes"
+            placeholder="add a note about how you're feeling…"
+            rows="3"
+            maxlength="4000">${escapeHtml(entry.notes || '')}</textarea>
+          <div class="journal-row-actions">
+            <button type="button" class="row-action row-replay">▶ replay</button>
+            <button type="button" class="row-action row-save">save note</button>
+            <button type="button" class="row-action row-delete">delete</button>
+          </div>
+        </div>
       `;
-      row.addEventListener('click', () => replayJournalEntry(entry));
+
+      // Tap the row to expand. Clicks INSIDE the expand panel must not
+      // re-toggle, so the panel + every action stops propagation.
+      row.addEventListener('click', (e) => {
+        if (e.target.closest('.journal-row-expand')) return;
+        toggleJournalRowExpand(row);
+      });
+      const expand = row.querySelector('.journal-row-expand');
+      expand.addEventListener('click', (e) => e.stopPropagation());
+
+      row.querySelector('.row-replay').addEventListener('click', (e) => {
+        e.stopPropagation();
+        replayJournalEntry(entry);
+      });
+      row.querySelector('.row-save').addEventListener('click', (e) => {
+        e.stopPropagation();
+        saveJournalRowNote(row, entry);
+      });
+      row.querySelector('.row-delete').addEventListener('click', (e) => {
+        e.stopPropagation();
+        deleteJournalRow(row, entry);
+      });
       return row;
+    }
+
+    // Only one row expanded at a time keeps the journal scrollable on mobile
+    // when notes get long.
+    function toggleJournalRowExpand(row) {
+      const expand = row.querySelector('.journal-row-expand');
+      const isOpen = !expand.hidden;
+      // Collapse any other open row first.
+      document.querySelectorAll('.journal-row.is-expanded').forEach(other => {
+        if (other !== row) {
+          other.classList.remove('is-expanded');
+          other.querySelector('.journal-row-expand').hidden = true;
+        }
+      });
+      expand.hidden = isOpen;
+      row.classList.toggle('is-expanded', !isOpen);
+      if (!isOpen) {
+        // Focus the textarea on open so the keyboard pops on mobile.
+        setTimeout(() => row.querySelector('.journal-notes')?.focus(), 80);
+      }
+    }
+
+    async function saveJournalRowNote(row, entry) {
+      const textarea = row.querySelector('.journal-notes');
+      const saveBtn = row.querySelector('.row-save');
+      const notes = textarea.value.trim() || null;
+      saveBtn.disabled = true;
+      try {
+        const resp = await authedFetch(`${API_BASE}/api/journal/${entry.recommendation_id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ notes }),
+        });
+        if (!resp.ok) throw new Error(`server returned ${resp.status}`);
+        entry.notes = notes;
+        // Keep the in-memory cache fresh so a re-expand shows the saved value.
+        const idx = journalEntries.findIndex(e => e.recommendation_id === entry.recommendation_id);
+        if (idx >= 0) journalEntries[idx].notes = notes;
+        saveBtn.classList.add('is-saved');
+        saveBtn.textContent = 'saved ✓';
+        setTimeout(() => {
+          saveBtn.classList.remove('is-saved');
+          saveBtn.textContent = 'save note';
+          saveBtn.disabled = false;
+          // Collapse the row after the flash so the user sees the list again.
+          row.classList.remove('is-expanded');
+          row.querySelector('.journal-row-expand').hidden = true;
+        }, 900);
+      } catch (e) {
+        saveBtn.disabled = false;
+        console.warn('save note failed:', e);
+        showAuthToast("couldn't save note — try again");
+      }
+    }
+
+    async function deleteJournalRow(row, entry) {
+      if (!window.confirm('Delete this entry? This can’t be undone here.')) return;
+      try {
+        const resp = await authedFetch(`${API_BASE}/api/journal/${entry.recommendation_id}`, {
+          method: 'DELETE',
+        });
+        if (!resp.ok) throw new Error(`server returned ${resp.status}`);
+        row.classList.add('is-removing');
+        setTimeout(() => {
+          row.remove();
+          journalEntries = journalEntries.filter(e => e.recommendation_id !== entry.recommendation_id);
+          if (journalEntries.length === 0) $('journal-empty').hidden = false;
+        }, 280);
+      } catch (e) {
+        console.warn('delete entry failed:', e);
+        showAuthToast("couldn't delete entry — try again");
+      }
     }
 
     function escapeHtml(s) {

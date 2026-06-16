@@ -108,6 +108,12 @@ def init_db() -> None:
                 CREATE INDEX IF NOT EXISTS idx_event_type ON events (event_type);
                 CREATE INDEX IF NOT EXISTS idx_event_created ON events (created_at DESC);
 
+                -- Phase 6 ship 3.5: user-written reflection + soft delete.
+                -- notes is the user's own text per entry. deleted_at is a
+                -- soft-delete sentinel so analytics queries keep working.
+                ALTER TABLE recommendations ADD COLUMN IF NOT EXISTS notes TEXT;
+                ALTER TABLE recommendations ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+
                 -- Phase 6 ship 2: authenticated users. PK is the Clerk user_id
                 -- string (e.g. "user_2abc..."), used directly so we don't carry
                 -- a separate internal id.
@@ -283,11 +289,12 @@ def fetch_journal(user_id: str, limit: int = 20, before_iso: str | None = None) 
             SELECT id, created_at, prompt,
                    song_title, artist, one_liner, key_lyric, iso_reasoning,
                    album_art_url, preview_url, track_view_url,
-                   streaming_links, helped, detected_language
+                   streaming_links, helped, detected_language, notes
               FROM recommendations
              WHERE user_id = %s
                AND safety = FALSE
                AND song_title IS NOT NULL
+               AND deleted_at IS NULL
         """
         params: list = [user_id]
         if before_iso:
@@ -310,6 +317,54 @@ def fetch_journal(user_id: str, limit: int = 20, before_iso: str | None = None) 
     except Exception as e:
         print(f"db: fetch_journal failed: {type(e).__name__}: {e}")
         return []
+
+
+def update_entry_note(rec_id: str, user_id: str, notes: str | None) -> bool:
+    """Set the user-written notes on a journal entry. Ownership-checked at the
+    SQL level — a hostile rec_id from another account silently no-ops."""
+    if _pool is None or not rec_id or not user_id:
+        return False
+    try:
+        with _conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE recommendations
+                       SET notes = %s
+                     WHERE id = %s AND user_id = %s AND deleted_at IS NULL
+                    """,
+                    (notes, rec_id, user_id),
+                )
+                matched = cur.rowcount > 0
+            conn.commit()
+        return matched
+    except Exception as e:
+        print(f"db: update_entry_note failed: {type(e).__name__}: {e}")
+        return False
+
+
+def soft_delete_entry(rec_id: str, user_id: str) -> bool:
+    """Soft-delete a journal entry by stamping deleted_at. Analytics queries
+    keep working; the journal view filters these out. Ownership-checked."""
+    if _pool is None or not rec_id or not user_id:
+        return False
+    try:
+        with _conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE recommendations
+                       SET deleted_at = NOW()
+                     WHERE id = %s AND user_id = %s AND deleted_at IS NULL
+                    """,
+                    (rec_id, user_id),
+                )
+                matched = cur.rowcount > 0
+            conn.commit()
+        return matched
+    except Exception as e:
+        print(f"db: soft_delete_entry failed: {type(e).__name__}: {e}")
+        return False
 
 
 def migrate_anon_to_user(user_id: str, anon_id: str) -> dict:
