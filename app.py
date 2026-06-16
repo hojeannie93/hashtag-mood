@@ -271,6 +271,14 @@ def index():
     return send_from_directory("static", "index.html")
 
 
+@app.route("/sso-callback")
+def sso_callback():
+    """Dedicated SPA route Clerk redirects back to after the OAuth provider
+    returns. The SPA detects this path on load and calls handleRedirectCallback
+    to finish the auth handshake."""
+    return send_from_directory("static", "index.html")
+
+
 @app.route("/favicon.ico")
 def favicon():
     # Browsers auto-request this before parsing the <link rel="icon"> in <head>.

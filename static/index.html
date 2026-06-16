@@ -1505,9 +1505,11 @@
     let clerkInitPromise = null;
 
     async function initClerk() {
+      console.log('[mood] initClerk start, path=', window.location.pathname);
       try {
         const cfg = await fetch(`${API_BASE}/api/config`).then(r => r.ok ? r.json() : ({}));
         const pk = cfg.clerk_publishable_key;
+        console.log('[mood] config fetched, pk_present=', !!pk);
         if (!pk) return;  // Anon-only mode when no key configured
         await new Promise((resolve, reject) => {
           const s = document.createElement('script');
@@ -1521,39 +1523,41 @@
         });
         await window.Clerk.load();
         clerkReady = true;
+        console.log('[mood] Clerk.load complete, user=', window.Clerk.user?.id || null);
         window.Clerk.addListener(handleClerkAuthChange);
 
-        // Explicit OAuth callback handling. Clerk.load() does NOT reliably
-        // process the post-redirect callback for custom flows in v5 — auto-
-        // detection is intended for the hosted UI, not for our headless setup.
-        // Detect the marker params Clerk attaches to redirectUrl and call
-        // handleRedirectCallback explicitly.
-        const url = new URL(window.location.href);
-        const hasClerkCallback =
-          url.searchParams.has('__clerk_status') ||
-          url.searchParams.has('__clerk_handshake') ||
-          url.searchParams.has('__clerk_ticket') ||
-          url.hash.includes('__clerk');
-        if (hasClerkCallback) {
+        // ── SSO callback path: Clerk just redirected here after the OAuth
+        // provider returned. Finish the handshake then bounce to / so the
+        // URL stays clean for the user.
+        if (window.location.pathname === SSO_CALLBACK_PATH) {
+          console.log('[mood] sso-callback path detected, calling handleRedirectCallback');
           try {
             await window.Clerk.handleRedirectCallback({
-              redirectUrl: window.location.pathname,
-              redirectUrlComplete: window.location.pathname,
+              redirectUrl: window.location.origin + SSO_CALLBACK_PATH,
+              redirectUrlComplete: window.location.origin + '/',
             });
+            console.log('[mood] handleRedirectCallback resolved, user=', window.Clerk.user?.id || null);
           } catch (e) {
-            console.warn('clerk redirect callback failed:', e);
+            console.error('[mood] handleRedirectCallback FAILED:', e);
           }
+          // After handleRedirectCallback, Clerk navigates to redirectUrlComplete.
+          // We won't reach the code below in that case. If we do (no-op), bail.
+          return;
         }
 
-        // Fire migrate handler for the resolved state (returning session or
-        // freshly-completed OAuth) — addListener doesn't replay past events.
+        // ── Normal page load. If we have a signed-in user (existing session
+        // OR fresh post-OAuth — Clerk.load detects both), fire the migrate
+        // handler manually since addListener doesn't replay past events.
         if (window.Clerk.user) {
+          console.log('[mood] signed-in detected, routing to journal');
           await handleClerkAuthChange({ user: window.Clerk.user });
           await loadJournal();
           showScreen('screen-journal');
+        } else {
+          console.log('[mood] anon mode, staying on input');
         }
       } catch (e) {
-        console.warn('clerk init failed (falling back to anon-only):', e);
+        console.warn('[mood] clerk init failed (falling back to anon-only):', e);
       }
     }
 
@@ -1592,14 +1596,15 @@
       // Action is NOT auto-re-run after signup. User re-taps deliberately.
     }
 
-    // Clerk v5 OAuth flow: single authenticateWithRedirect call that takes
-    // strategy + both URLs together. Calling signIn.create({strategy}) first
-    // triggers a 422 "redirect_url is required" because the create POST
-    // doesn't get the redirect URL passed through.
-    // sessionStorage flag set right before the OAuth redirect, read on the
-    // return trip so the success toast only shows on a fresh signup — not on
-    // every hard-refresh of an already-signed-in returning user.
+    // Clerk v5 custom-flow pattern (documented):
+    //   redirectUrl         = a dedicated SPA route (/sso-callback) that mounts
+    //                          Clerk JS and calls handleRedirectCallback.
+    //   redirectUrlComplete = the final destination after the handshake.
+    // Using window.location.href for BOTH (our previous setup) collapsed those
+    // two steps inside Clerk and dropped the status params silently — users
+    // landed back on input with no signed-in state.
     const SIGNUP_FLAG = 'mood-signup-in-progress';
+    const SSO_CALLBACK_PATH = '/sso-callback';
 
     async function signInWithGoogle() {
       if (!clerkReady) return;
@@ -1607,12 +1612,12 @@
         sessionStorage.setItem(SIGNUP_FLAG, '1');
         await window.Clerk.client.signIn.authenticateWithRedirect({
           strategy: 'oauth_google',
-          redirectUrl: window.location.href,
-          redirectUrlComplete: window.location.href,
+          redirectUrl: window.location.origin + SSO_CALLBACK_PATH,
+          redirectUrlComplete: window.location.origin + '/',
         });
       } catch (e) {
         sessionStorage.removeItem(SIGNUP_FLAG);
-        console.error('google signin failed:', e);
+        console.error('[mood] google signin failed:', e);
       }
     }
 
@@ -1622,12 +1627,12 @@
         sessionStorage.setItem(SIGNUP_FLAG, '1');
         await window.Clerk.client.signIn.authenticateWithRedirect({
           strategy: 'oauth_apple',
-          redirectUrl: window.location.href,
-          redirectUrlComplete: window.location.href,
+          redirectUrl: window.location.origin + SSO_CALLBACK_PATH,
+          redirectUrlComplete: window.location.origin + '/',
         });
       } catch (e) {
         sessionStorage.removeItem(SIGNUP_FLAG);
-        console.error('apple signin failed:', e);
+        console.error('[mood] apple signin failed:', e);
       }
     }
 
