@@ -1404,11 +1404,15 @@
       // Action is NOT auto-re-run after signup. User re-taps deliberately.
     }
 
+    // Clerk v5 OAuth flow: single authenticateWithRedirect call that takes
+    // strategy + both URLs together. Calling signIn.create({strategy}) first
+    // triggers a 422 "redirect_url is required" because the create POST
+    // doesn't get the redirect URL passed through.
     async function signInWithGoogle() {
       if (!clerkReady) return;
       try {
-        const signIn = await window.Clerk.client.signIn.create({ strategy: 'oauth_google' });
-        await signIn.authenticateWithRedirect({
+        await window.Clerk.client.signIn.authenticateWithRedirect({
+          strategy: 'oauth_google',
           redirectUrl: window.location.href,
           redirectUrlComplete: window.location.href,
         });
@@ -1418,8 +1422,8 @@
     async function signInWithApple() {
       if (!clerkReady) return;
       try {
-        const signIn = await window.Clerk.client.signIn.create({ strategy: 'oauth_apple' });
-        await signIn.authenticateWithRedirect({
+        await window.Clerk.client.signIn.authenticateWithRedirect({
+          strategy: 'oauth_apple',
           redirectUrl: window.location.href,
           redirectUrlComplete: window.location.href,
         });
