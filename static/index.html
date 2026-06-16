@@ -2877,11 +2877,13 @@
         </div>
       `;
 
-      // Tap the row to expand. Clicks INSIDE the expand panel must not
-      // re-toggle, so the panel + every action stops propagation.
+      // Tap the row to expand + auto-play the preview. Clicks INSIDE the
+      // expand panel must not re-toggle, so the panel + every action stops
+      // propagation. `entry` is captured in closure so toggleJournalRowExpand
+      // can fire the preview synchronously inside the user-gesture context.
       row.addEventListener('click', (e) => {
         if (e.target.closest('.journal-row-expand')) return;
-        toggleJournalRowExpand(row);
+        toggleJournalRowExpand(row, entry);
       });
       const expand = row.querySelector('.journal-row-expand');
       expand.addEventListener('click', (e) => e.stopPropagation());
@@ -2903,7 +2905,7 @@
 
     // Only one row expanded at a time keeps the journal scrollable on mobile
     // when notes get long.
-    function toggleJournalRowExpand(row) {
+    function toggleJournalRowExpand(row, entry) {
       const expand = row.querySelector('.journal-row-expand');
       const isOpen = !expand.hidden;
       // Collapse any other open row first.
@@ -2916,8 +2918,20 @@
       expand.hidden = isOpen;
       row.classList.toggle('is-expanded', !isOpen);
       if (!isOpen) {
+        // Just opened — start the 30-second preview synchronously in this
+        // user-gesture context so Safari/mobile autoplay isn't blocked.
+        // The audio element lives inside #screen-result but plays fine even
+        // when that screen isn't active (display:none doesn't pause audio).
+        if (entry && entry.preview_url) {
+          setPreview(entry.preview_url);
+          playPreview();
+        }
         // Focus the textarea on open so the keyboard pops on mobile.
         setTimeout(() => row.querySelector('.journal-notes')?.focus(), 80);
+      } else {
+        // Just collapsed — stop the preview so the song doesn't keep playing
+        // in the background after the user has closed the row.
+        stopPreview();
       }
     }
 
