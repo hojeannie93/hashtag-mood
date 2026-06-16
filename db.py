@@ -343,6 +343,33 @@ def update_entry_note(rec_id: str, user_id: str, notes: str | None) -> bool:
         return False
 
 
+def claim_recommendation(rec_id: str, user_id: str) -> bool:
+    """Explicitly assign user_id to a single recommendation row, BUT only if
+    it's still unclaimed (user_id IS NULL). Used by /api/auth/migrate for the
+    deterministic post-signup handoff — the frontend passes the just-served
+    recommendation_id so the song that triggered signup is reliably preserved
+    even when the session_id heuristic finds nothing."""
+    if _pool is None or not rec_id or not user_id:
+        return False
+    try:
+        with _conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE recommendations
+                       SET user_id = %s
+                     WHERE id = %s AND user_id IS NULL
+                    """,
+                    (user_id, rec_id),
+                )
+                matched = cur.rowcount > 0
+            conn.commit()
+        return matched
+    except Exception as e:
+        print(f"db: claim_recommendation failed: {type(e).__name__}: {e}")
+        return False
+
+
 def soft_delete_entry(rec_id: str, user_id: str) -> bool:
     """Soft-delete a journal entry by stamping deleted_at. Analytics queries
     keep working; the journal view filters these out. Ownership-checked."""
