@@ -480,6 +480,54 @@ def api_auth_migrate():
     return jsonify({"ok": True, "migrated": moved, "primary_provider": provider})
 
 
+@app.route("/api/journal")
+def api_journal():
+    """Reverse-chron timeline of the signed-in user's entries.
+
+    Each entry is shaped to plug straight into the SPA's renderPick() — same
+    field names as /api/recommend's response — so tapping a row replays the
+    song without an extra round-trip.
+
+    Cursor pagination: pass ?before=<iso_ts> with the prior page's last
+    created_at to fetch the next page. ?limit caps at 50.
+    """
+    auth_user = _current_user(request)
+    if not auth_user or not auth_user.get("id"):
+        return jsonify({"ok": False, "error": "not authenticated"}), 401
+    user_id = auth_user["id"]
+    before_iso = request.args.get("before") or None
+    try:
+        limit = min(int(request.args.get("limit", 20)), 50)
+    except ValueError:
+        limit = 20
+    rows = db.fetch_journal(user_id=user_id, limit=limit, before_iso=before_iso)
+    # Rename DB column id → recommendation_id so the journal payload matches
+    # exactly what /api/recommend returns. Same for safety flag (always False
+    # in journal results because fetch_journal filters them out).
+    entries = []
+    for r in rows:
+        entries.append({
+            "recommendation_id": r.get("id"),
+            "created_at": r.get("created_at"),
+            "prompt": r.get("prompt"),
+            "song_title": r.get("song_title"),
+            "artist": r.get("artist"),
+            "one_liner": r.get("one_liner"),
+            "key_lyric": r.get("key_lyric"),
+            "iso_reasoning": r.get("iso_reasoning"),
+            "album_art_url": r.get("album_art_url"),
+            "preview_url": r.get("preview_url"),
+            "track_view_url": r.get("track_view_url"),
+            "streaming_links": r.get("streaming_links") or {},
+            "plain_lyrics": None,  # lyrics aren't cached in recommendations row
+            "helped": r.get("helped"),
+            "detected_language": r.get("detected_language"),
+            "safety": False,
+        })
+    next_cursor = entries[-1]["created_at"] if len(entries) == limit else None
+    return jsonify({"entries": entries, "next_cursor": next_cursor})
+
+
 # ── Synced lyrics via Whisper ─────────────────────────────────────────────────
 # Lazy: only runs when the user actually taps play. Result cached per-rec-id so
 # replays are instant. LRU-bounded so memory stays predictable across many recs.
