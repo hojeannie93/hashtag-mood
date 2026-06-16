@@ -350,6 +350,7 @@ def api_recommend():
             "streaming_links": streaming_links,
             "plain_lyrics": pick.get("plain_lyrics"),
             "recommendation_id": pick_rec_id,
+            "notes": None,  # fresh entries start without a user-written note
             "safety": False,
         }
         recommendations[pick_rec_id] = full_pick
@@ -530,10 +531,48 @@ def api_journal():
             "plain_lyrics": None,  # lyrics aren't cached in recommendations row
             "helped": r.get("helped"),
             "detected_language": r.get("detected_language"),
+            "notes": r.get("notes"),
             "safety": False,
         })
     next_cursor = entries[-1]["created_at"] if len(entries) == limit else None
     return jsonify({"entries": entries, "next_cursor": next_cursor})
+
+
+@app.route("/api/journal/<rec_id>", methods=["PATCH"])
+def api_journal_patch(rec_id):
+    """Update the user-written notes on a single entry. Body: {notes: str|null}.
+    Returns 401 if unauth, 404 if no row matched the (rec_id, user_id) pair —
+    same response so we don't leak whether the row exists for another user."""
+    auth_user = _current_user(request)
+    if not auth_user or not auth_user.get("id"):
+        return jsonify({"ok": False, "error": "not authenticated"}), 401
+    data = request.get_json(silent=True) or {}
+    notes_raw = data.get("notes")
+    if notes_raw is not None and not isinstance(notes_raw, str):
+        return jsonify({"ok": False, "error": "notes must be a string or null"}), 400
+    # Cap at a sensible length so a hostile client can't dump megabytes.
+    notes = notes_raw.strip() if isinstance(notes_raw, str) else None
+    if notes is not None and len(notes) > 4000:
+        notes = notes[:4000]
+    if notes == "":
+        notes = None  # treat empty string as cleared note
+    ok = db.update_entry_note(rec_id, auth_user["id"], notes)
+    if not ok:
+        return jsonify({"ok": False, "error": "not found"}), 404
+    return jsonify({"ok": True, "notes": notes})
+
+
+@app.route("/api/journal/<rec_id>", methods=["DELETE"])
+def api_journal_delete(rec_id):
+    """Soft-delete a journal entry. The row stays in Postgres with deleted_at
+    set; journal fetch + result-screen replay both filter it out."""
+    auth_user = _current_user(request)
+    if not auth_user or not auth_user.get("id"):
+        return jsonify({"ok": False, "error": "not authenticated"}), 401
+    ok = db.soft_delete_entry(rec_id, auth_user["id"])
+    if not ok:
+        return jsonify({"ok": False, "error": "not found"}), 404
+    return jsonify({"ok": True})
 
 
 # ── Synced lyrics via Whisper ─────────────────────────────────────────────────
