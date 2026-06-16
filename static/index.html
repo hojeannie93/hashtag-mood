@@ -1532,16 +1532,26 @@
         if (window.location.pathname === SSO_CALLBACK_PATH) {
           console.log('[mood] sso-callback path detected, calling handleRedirectCallback');
           try {
+            // v5 prop names: forceRedirectUrl wins over Clerk's default account-
+            // portal redirect. Without these, Clerk bounces to its own dashboard
+            // sign-in page (deprecated redirectUrl/redirectUrlComplete are ignored
+            // and an empty target falls back to Clerk's hosted UI).
             await window.Clerk.handleRedirectCallback({
-              redirectUrl: window.location.origin + SSO_CALLBACK_PATH,
-              redirectUrlComplete: window.location.origin + '/',
+              signInForceRedirectUrl: '/',
+              signUpForceRedirectUrl: '/',
+              signInFallbackRedirectUrl: '/',
+              signUpFallbackRedirectUrl: '/',
             });
             console.log('[mood] handleRedirectCallback resolved, user=', window.Clerk.user?.id || null);
           } catch (e) {
             console.error('[mood] handleRedirectCallback FAILED:', e);
           }
-          // After handleRedirectCallback, Clerk navigates to redirectUrlComplete.
-          // We won't reach the code below in that case. If we do (no-op), bail.
+          // After handleRedirectCallback, Clerk navigates to /. If we somehow
+          // stayed on this path (no-op or error), force the navigation ourselves.
+          if (window.location.pathname === SSO_CALLBACK_PATH) {
+            console.log('[mood] forcing navigation to / after callback');
+            window.location.replace('/');
+          }
           return;
         }
 
@@ -1613,7 +1623,10 @@
         await window.Clerk.client.signIn.authenticateWithRedirect({
           strategy: 'oauth_google',
           redirectUrl: window.location.origin + SSO_CALLBACK_PATH,
+          // v5 prop name. redirectUrlComplete is deprecated and silently ignored.
           redirectUrlComplete: window.location.origin + '/',
+          signInForceRedirectUrl: window.location.origin + '/',
+          signUpForceRedirectUrl: window.location.origin + '/',
         });
       } catch (e) {
         sessionStorage.removeItem(SIGNUP_FLAG);
@@ -1629,6 +1642,8 @@
           strategy: 'oauth_apple',
           redirectUrl: window.location.origin + SSO_CALLBACK_PATH,
           redirectUrlComplete: window.location.origin + '/',
+          signInForceRedirectUrl: window.location.origin + '/',
+          signUpForceRedirectUrl: window.location.origin + '/',
         });
       } catch (e) {
         sessionStorage.removeItem(SIGNUP_FLAG);
