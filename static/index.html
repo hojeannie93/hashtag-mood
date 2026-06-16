@@ -3000,6 +3000,12 @@
       renderPick(entry);
       showScreen('screen-result');
       updateNavButtonsState();
+      // Kick off the 30-second preview synchronously inside the row-tap
+      // handler so Safari/mobile browsers honor the user-gesture and allow
+      // audio.play(). renderPick's image-onload also calls playPreview as a
+      // backup, but waiting on the network there usually loses the gesture
+      // context and autoplay gets blocked.
+      if (entry.preview_url) playPreview();
     }
 
     async function handleSignOut() {
