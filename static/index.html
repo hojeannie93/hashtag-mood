@@ -1522,6 +1522,15 @@
         await window.Clerk.load();
         clerkReady = true;
         window.Clerk.addListener(handleClerkAuthChange);
+        // Clerk processes any pending OAuth-redirect callback INSIDE load(),
+        // which sets Clerk.user before our listener is registered. addListener
+        // does NOT replay past events, so we'd miss the migrate trigger for
+        // both fresh signups (just-completed redirect) AND returning sessions
+        // (cookie restored on hard-refresh). Fire the handler manually here
+        // for whatever state Clerk landed in.
+        if (window.Clerk.user) {
+          await handleClerkAuthChange({ user: window.Clerk.user });
+        }
       } catch (e) {
         console.warn('clerk init failed (falling back to anon-only):', e);
       }
