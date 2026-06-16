@@ -107,6 +107,28 @@ def init_db() -> None:
                 CREATE INDEX IF NOT EXISTS idx_event_rec  ON events (recommendation_id);
                 CREATE INDEX IF NOT EXISTS idx_event_type ON events (event_type);
                 CREATE INDEX IF NOT EXISTS idx_event_created ON events (created_at DESC);
+
+                -- Phase 6 ship 2: authenticated users. PK is the Clerk user_id
+                -- string (e.g. "user_2abc..."), used directly so we don't carry
+                -- a separate internal id.
+                CREATE TABLE IF NOT EXISTS users (
+                    id              TEXT PRIMARY KEY,
+                    email           TEXT,
+                    primary_provider TEXT,
+                    signup_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    last_active_at  TIMESTAMPTZ,
+                    signup_anon_id  TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_users_signup    ON users (signup_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_users_anon      ON users (signup_anon_id);
+
+                -- user_id column on recommendations + events so post-signup
+                -- queries can join cleanly. Indexes support the journal view.
+                ALTER TABLE recommendations ADD COLUMN IF NOT EXISTS user_id TEXT;
+                CREATE INDEX IF NOT EXISTS idx_rec_user ON recommendations (user_id, created_at DESC);
+
+                ALTER TABLE events ADD COLUMN IF NOT EXISTS user_id TEXT;
+                CREATE INDEX IF NOT EXISTS idx_event_user ON events (user_id, created_at DESC);
             """)
         conn.commit()
     print("db: schema ready")
@@ -120,6 +142,7 @@ def save_recommendation(
     result: dict,
     user_agent: str | None = None,
     ip_hash: str | None = None,
+    user_id: str | None = None,
 ) -> None:
     """Persist one recommend call. Result may be a safety response or a song payload."""
     if _pool is None:
@@ -130,17 +153,18 @@ def save_recommendation(
                 cur.execute(
                     """
                     INSERT INTO recommendations (
-                        id, session_id, prompt, category,
+                        id, session_id, user_id, prompt, category,
                         safety, song_title, artist, one_liner, key_lyric,
                         iso_reasoning, album_art_url, preview_url, track_view_url,
                         streaming_links, user_agent, ip_hash
                     )
-                    VALUES (%s,%s,%s,%s, %s,%s,%s,%s,%s, %s,%s,%s,%s, %s,%s,%s)
+                    VALUES (%s,%s,%s,%s,%s, %s,%s,%s,%s,%s, %s,%s,%s,%s, %s,%s,%s)
                     ON CONFLICT (id) DO NOTHING
                     """,
                     (
                         rec_id,
                         session_id,
+                        user_id,
                         prompt,
                         category,
                         bool(result.get("safety", False)),
@@ -166,6 +190,7 @@ def save_event(
     recommendation_id: str | None,
     session_id: str | None,
     event_type: str,
+    user_id: str | None = None,
 ) -> None:
     """Persist one event (view, share, save, open_spotify, etc)."""
     if _pool is None:
@@ -175,10 +200,10 @@ def save_event(
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO events (recommendation_id, session_id, event_type)
-                    VALUES (%s, %s, %s)
+                    INSERT INTO events (recommendation_id, session_id, user_id, event_type)
+                    VALUES (%s, %s, %s, %s)
                     """,
-                    (recommendation_id, session_id, event_type),
+                    (recommendation_id, session_id, user_id, event_type),
                 )
             conn.commit()
     except Exception as e:
@@ -215,3 +240,66 @@ def set_language(rec_id: str, lang: str | None) -> None:
             conn.commit()
     except Exception as e:
         print(f"db: set_language failed: {type(e).__name__}: {e}")
+
+
+def upsert_user(
+    user_id: str,
+    email: str | None,
+    primary_provider: str | None,
+    signup_anon_id: str | None,
+) -> None:
+    """Insert a user on first signup; bump last_active_at on every subsequent call.
+    primary_provider and signup_anon_id are locked in at first insert and never
+    overwritten (a returning user's session_id is different from their original)."""
+    if _pool is None:
+        return
+    try:
+        with _conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO users (id, email, primary_provider, signup_anon_id, last_active_at)
+                    VALUES (%s, %s, %s, %s, NOW())
+                    ON CONFLICT (id) DO UPDATE
+                        SET email = COALESCE(users.email, EXCLUDED.email),
+                            last_active_at = NOW()
+                    """,
+                    (user_id, email, primary_provider, signup_anon_id),
+                )
+            conn.commit()
+    except Exception as e:
+        print(f"db: upsert_user failed: {type(e).__name__}: {e}")
+
+
+def migrate_anon_to_user(user_id: str, anon_id: str) -> dict:
+    """Claim every recommendation + event tagged with this anon session_id for
+    the given user. Idempotent — safe to call on every signin from the same
+    anon device. Returns {recommendations: n, events: n} for observability."""
+    if _pool is None or not anon_id or not user_id:
+        return {"recommendations": 0, "events": 0}
+    try:
+        with _conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE recommendations
+                       SET user_id = %s
+                     WHERE session_id = %s AND user_id IS NULL
+                    """,
+                    (user_id, anon_id),
+                )
+                rec_n = cur.rowcount
+                cur.execute(
+                    """
+                    UPDATE events
+                       SET user_id = %s
+                     WHERE session_id = %s AND user_id IS NULL
+                    """,
+                    (user_id, anon_id),
+                )
+                evt_n = cur.rowcount
+            conn.commit()
+        return {"recommendations": rec_n, "events": evt_n}
+    except Exception as e:
+        print(f"db: migrate_anon_to_user failed: {type(e).__name__}: {e}")
+        return {"recommendations": 0, "events": 0}

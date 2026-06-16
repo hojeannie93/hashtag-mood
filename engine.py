@@ -801,12 +801,32 @@ def get_clean_candidates(
 ) -> list[dict]:
     """Call get_candidates() and programmatically filter disqualified picks.
 
-    If fewer than 3 clean picks come back, retry with the violators added to the
-    exclusion clause. Caps at max_retries to avoid infinite loops.
+    Hard filters out:
+      • Songs in the DISQUALIFIED_SONGS curated blocklist.
+      • Songs in `used_songs` (the LLM's exclusion-clause adherence is soft;
+        this is the backstop for when it ignores the instruction on a skip-
+        triggered fresh batch).
+      • Duplicates within a single batch.
+
+    If fewer than 3 clean picks come back, retry with the violators added to
+    the exclusion clause. Caps at max_retries to avoid infinite loops.
     """
     used_songs = list(used_songs) if used_songs else []
+
+    # Pre-compute normalized (title, artist) keys for fast lookup against
+    # whatever the LLM hands back. `used_songs` items look like "Title by Artist".
+    def _key(title: str, artist: str) -> tuple[str, str]:
+        return (_normalize_title(title), _normalize_artist(artist))
+
+    used_keys: set[tuple[str, str]] = set()
+    for u in used_songs:
+        parts = u.rsplit(" by ", 1)
+        if len(parts) == 2:
+            used_keys.add(_key(parts[0], parts[1]))
+
     clean: list[dict] = []
     blocked: list[str] = []
+    seen_keys: set[tuple[str, str]] = set(used_keys)
 
     for attempt in range(max_retries + 1):
         excl_parts = used_songs + blocked + [
@@ -827,12 +847,17 @@ def get_clean_candidates(
         candidates = get_candidates(user_prompt, exclusion, category=category)
 
         for c in candidates:
+            label = f"{c['song_title']} by {c['artist']}"
+            k = _key(c["song_title"], c["artist"])
             if is_disqualified(c["song_title"], c["artist"]):
-                key = f"{c['song_title']} by {c['artist']}"
-                blocked.append(key)
-                print(f"    × filtered (disqualified): {c['song_title']} by {c['artist']}")
+                blocked.append(label)
+                print(f"    × filtered (disqualified): {label}")
+            elif k in seen_keys:
+                blocked.append(label)
+                print(f"    × filtered (already used or duplicate): {label}")
             else:
                 clean.append(c)
+                seen_keys.add(k)
 
         if len(clean) >= 3:
             break

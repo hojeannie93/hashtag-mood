@@ -7,3 +7,4 @@ psycopg[binary,pool]==3.2.3
 python-dotenv==1.2.2
 requests==2.34.2
 langdetect==1.0.9
+clerk-backend-api==6.0.1
