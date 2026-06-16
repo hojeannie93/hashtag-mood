@@ -65,6 +65,25 @@ DISQUALIFIED_SONGS: list[tuple[str, str]] = [
     ("Keep Your Head Up", "Ben Howard"),
     # Overused classic — the engine's default for any "stuck / behind in life" prompt
     ("Vienna", "Billy Joel"),
+    # Engine default-pick blocklist — songs that became dominant defaults across
+    # too many unrelated emotional prompts, matching mood categories instead of
+    # distinguishing details. Mirrors the named list in CANDIDATE_SYSTEM's
+    # VARIETY REQUIREMENT section. Hard-filter here so the model can't override.
+    ("Slow Burn", "Kacey Musgraves"),
+    ("Fourth of July", "Sufjan Stevens"),
+    ("Class of 2013", "Mitski"),
+    ("Motion Sickness", "Phoebe Bridgers"),
+    ("Stupid Deep", "Jon Bellion"),
+    ("Saturn", "Sleeping at Last"),
+    ("Stick Season", "Noah Kahan"),
+    ("Liability", "Lorde"),
+    ("Hard Feelings", "Lorde"),
+    ("Levitating", "Dua Lipa"),
+    ("On Top of the World", "Imagine Dragons"),
+    ("Good News", "Mac Miller"),
+    ("Cardigan", "Taylor Swift"),
+    ("The Night We Met", "Lord Huron"),
+    ("Home", "Gabrielle Aplin"),
 ]
 
 
@@ -426,6 +445,51 @@ Reject the candidate UNLESS the song's lyrical argument is independently a perfe
 specific match (rare). Default: find a song whose ARGUMENT addresses the situation
 and whose title does NOT echo the user's vocabulary.
 
+VARIETY REQUIREMENT — no defaults, ever:
+
+Every prompt is a FRESH search across the entire space of songs ever recorded.
+You do NOT have a set of "trusted picks" you reach for on similar prompts.
+If you find yourself reaching for any of:
+
+- Slow Burn (Kacey Musgraves)
+- Fourth of July (Sufjan Stevens)
+- Class of 2013 (Mitski)
+- Motion Sickness (Phoebe Bridgers)
+- Stupid Deep (Jon Bellion)
+- Saturn (Sleeping at Last)
+- Stick Season (Noah Kahan)
+- Liability (Lorde)
+- Hard Feelings (Lorde)
+- Levitating (Dua Lipa)
+- On Top of the World (Imagine Dragons)
+- Good News (Mac Miller)
+- Cardigan (Taylor Swift)
+
+— or any song you suspect you would have reached for on a completely different
+prompt — STOP and search wider. These specific titles are BANNED as candidates
+because they've become defaults across too many emotional textures, which means
+they're matching mood categories instead of distinguishing details. The catalog
+of modern songwriting is enormous; there is always a better-fitting specific
+song than the one that immediately came to mind.
+
+Before finalizing your 3 candidates, name (silently, to yourself) at least 5
+songs you considered and REJECTED for this specific prompt. If you can't, you
+didn't search broadly enough — start over.
+
+Diversify your final set across at least TWO of: era within 2015+, region
+(US / UK / EU / East Asia / Latin America / Australia), production style
+(acoustic singer-songwriter / electronic / band rock / hip-hop adjacent /
+orchestral), vocal arrangement (solo / harmony-heavy / spoken), emotional
+register (resigned / hopeful / raw / restrained). Three candidates that all
+sound like Phoebe Bridgers — or that all come from the same five-artist
+indie-folk shortlist — is a failed candidate set, even if each individually
+fits the prompt. Repeat with this in mind.
+
+A different listener encountering the same prompt 30 minutes from now should
+get DIFFERENT candidates than you produced. If your three picks are the
+"obvious" three any music recommender would land on, you have not done the
+work.
+
 DISTINGUISHING-ELEMENT TEST — the bar that separates real picks from defaults:
 What makes THIS prompt different from a generic version of the same emotion bucket?
 The user's specific words contain a distinguishing detail — a hedge, a contradiction,
@@ -438,29 +502,36 @@ argument must respond to ONE of those distinguishing details, not the broad cate
   Sunday-anchored stillness. A good candidate's argument must hook onto one of those,
   not just "sad."
 
-- Saturn (Sleeping at Last) — argument is about scale-of-self perspective shift.
-  Perfect for "five years ago — grown or just changed" (the prompt IS a perspective
-  question). WRONG for "feeling stuck after my MBA" — that prompt's distinguishing
-  element is paralysis-despite-credential, not perspective. Don't reuse Saturn just
-  because the user is reflecting.
+A song whose argument is about scale-of-self perspective shift might be a perfect
+fit for "five years ago — grown or just changed" (the prompt itself IS a perspective
+question), but the WRONG choice for "feeling stuck after my MBA" — that prompt's
+distinguishing element is paralysis-despite-credential, not perspective. The match
+is to the prompt's specific texture, not to the mood bucket.
 
 Final test before submitting a candidate: if you swapped this user's prompt for a
 generic version of the same emotion (e.g. "I feel sad", "I feel stuck"), would your
 candidate's why_it_responds still hold? If yes, your candidate isn't specific enough
 — find one whose argument requires the distinguishing detail to make sense.
 
-CORRECT pattern — what real listening looks like:
-- ✅ User: "every mistake seems louder than the voice saying you're enough"
-  → Stupid Deep (Jon Bellion) — song_argument: "the song is about self-doubt that
-  feels deeper than reality itself, refusing the easy reassurance." why_it_responds:
-  "the user's word 'louder' maps directly to the song's argument that self-criticism
-  has its own volume that drowns out everything else; the song sits in that exact
-  decibel rather than turning it down."
-- ✅ User: "you realize healing isn't just about erasing what's been hurt"
-  → Cardigan (Taylor Swift) — song_argument: "the song narrates being chosen and
-  discarded and the way the hurt becomes part of the wearer." why_it_responds: "the
-  user's 'isn't just about erasing' phrasing is what the song is literally about —
-  hurt that gets folded into who you become rather than wiped clean."
+CORRECT pattern — what real listening looks like (described abstractly so you
+search for the song that fits, not the named example):
+
+- ✅ User: "every mistake seems louder than the voice saying you're enough."
+  A well-fitting candidate is a song whose central argument is that self-doubt
+  has its own internal VOLUME — not a song that says "you're enough" (that
+  would dismiss the user), but one that sits inside the noise WITH them. The
+  match isn't to the mood label ("sad," "self-critical"); it's to the user's
+  word "louder" mapping to the song's lyrical argument about volume-as-the-
+  defining-condition. There are many songs in the modern catalogue that hit
+  this — find one specifically.
+
+- ✅ User: "you realize healing isn't just about erasing what's been hurt."
+  A well-fitting candidate is a song whose lyrical narration treats hurt as
+  becoming PART of the wearer — folded in, not wiped clean. The user's hedge
+  "isn't just about erasing" is the precise hook: the song must argue against
+  the erasure framing, not endorse it. Avoid generic resilience anthems; look
+  for narrative songs that treat scars as identity. Many songs from the 2015+
+  alt-pop / indie space do this — pick by lyrical content match.
 
 ISO PRINCIPLE: The song sits slightly ahead of the user's current state — not mirroring it,
 not leaping past it. Sad → sad but not despairing, arc implies a way through.
@@ -555,20 +626,27 @@ Mandatory rule for candidate composition:
   yourself: is there really no 2015+ artist who wrote about this exact emotional
   situation? Usually there is.
 
-Concrete pull list — when you reach for these defaults, look at the modern equivalent:
-- Considering Vienna (Billy Joel, 1977)? → look at Phoebe Bridgers, Mitski, Maggie
-  Rogers, Olivia Rodrigo, Lord Huron, Sleeping at Last, Holly Humberstone, Lizzy
-  McAlpine, Gracie Abrams, Noah Kahan, Bon Iver, Sufjan Stevens, Hozier, James Bay.
-- Considering Landslide / Dreams (Fleetwood Mac)? → Phoebe Bridgers, Big Thief,
-  Mitski, Florence + the Machine, Lana Del Rey, Adrianne Lenker.
-- Considering Vienna for "stuck / behind in life"? → Saturn (Sleeping at Last),
-  Motion Sickness (Phoebe Bridgers), Self Care (Mac Miller), Liability (Lorde),
-  Class of 2013 (Mitski), Slow Burn (Kacey Musgraves), Time After Time (Cyndi Lauper
-  is also pre-2010, skip), Hard Feelings (Lorde), Linger (The Cranberries → also
-  older, skip), Fourth of July (Sufjan), Stick Season (Noah Kahan).
+Concrete pull strategy — when you reach for a pre-2010 default, redirect WIDE,
+not to a short replacement list. The modern emotional-songwriting space is huge:
 
-A perfectly-matched 1975 song still beats a poorly-matched 2020 song — but the bar
-for "perfectly matched" is genuinely high. The era pressure here is real.
+- Pre-2000 introspective folk territory (Vienna / Landslide / Blackbird) →
+  search the 2015+ indie folk, bedroom pop, and singer-songwriter space.
+  Lyrical introspection is the dominant mode there. Hundreds of artists
+  write about the exact emotional territory you're trying to fill — your
+  specific pick should come from the user's distinguishing detail, not
+  from any short list of go-to names you've used before.
+
+- Pre-2010 sad pop (Adele / Sara McLachlan / Avril) → contemporary alt-pop,
+  indie pop, and Gen-Z confessional songwriters cover this space more
+  granularly. Pick by lyrical content match, not by artist name recognition.
+
+- Pre-2010 anthemic/uplift → modern alt-pop and indie pop that earns the lift.
+  Don't reach into the empty-anthem space (Stronger / Fight Song / Roar /
+  Firework are already disqualified — that's not where the live music lives).
+
+A perfectly-matched 1975 song still beats a poorly-matched 2020 song — but
+the bar for "perfectly matched" is genuinely high, and so is the bar for
+"this isn't a default I'd reach for on any sad / stuck / quiet prompt."
 """
 
 SELECTION_SYSTEM = """
@@ -654,14 +732,17 @@ evocative description of its musical character — e.g. "a slow piano figure tha
 rises and resolves", "the cello entering on the second movement", or just the
 title in quotes. Do NOT invent lyrics that don't exist. Other rules still apply.
 
-ERA PREFERENCE — STRONG bias toward recent songs:
+ERA PREFERENCE — soft, not the primary axis:
 
-The product audience is young. Recent songs (2015+) are the default cultural language.
-Don't pick a pre-2010 song unless its lyric is unmistakably more on-point than every
-modern alternative — not just "a bit better." If a 2015+ candidate's lyric meets the
-situation reasonably well, pick it over an older candidate whose lyric is "a slightly
-better mirror." The user benefits more from a current, shareable song than from a
-marginally-better classic.
+The candidate generation step already enforces era (most picks come back 2015+).
+Your job at SELECTION time is to rank by lyrical fit to the user's specific
+situation. Pick the candidate whose key_lyric and overall argument most directly
+mirror the user's distinguishing detail — pure lyrical fit, not era.
+
+If two candidates are roughly tied on lyrical fit, prefer the more recent one
+(younger audience, more shareable). If a pre-2015 candidate's lyric is meaningfully
+more on-point than every modern alternative in the set, pick it without apology.
+Don't downrank a perfectly-matched older song just because it's older.
 
 Output a single JSON object with no other text. The "picks" array contains every
 candidate ranked from best to worst, with picks[0] being your strongest match.
