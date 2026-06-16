@@ -271,6 +271,47 @@ def upsert_user(
         print(f"db: upsert_user failed: {type(e).__name__}: {e}")
 
 
+def fetch_journal(user_id: str, limit: int = 20, before_iso: str | None = None) -> list[dict]:
+    """Reverse-chron journal entries for a signed-in user. Cursor pagination via
+    `before_iso` — pass the previous page's last entry's `created_at` to fetch
+    the next page. Returns dicts shaped for the SPA's renderPick() so tapping a
+    row can replay the song without an extra round-trip."""
+    if _pool is None or not user_id:
+        return []
+    try:
+        sql = """
+            SELECT id, created_at, prompt,
+                   song_title, artist, one_liner, key_lyric, iso_reasoning,
+                   album_art_url, preview_url, track_view_url,
+                   streaming_links, helped, detected_language
+              FROM recommendations
+             WHERE user_id = %s
+               AND safety = FALSE
+               AND song_title IS NOT NULL
+        """
+        params: list = [user_id]
+        if before_iso:
+            sql += " AND created_at < %s"
+            params.append(before_iso)
+        sql += " ORDER BY created_at DESC LIMIT %s"
+        params.append(limit)
+
+        with _conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                cols = [d.name for d in cur.description]
+                rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        # Normalize created_at to ISO string so JSON serialization is straightforward.
+        for r in rows:
+            ca = r.get("created_at")
+            if ca is not None:
+                r["created_at"] = ca.isoformat()
+        return rows
+    except Exception as e:
+        print(f"db: fetch_journal failed: {type(e).__name__}: {e}")
+        return []
+
+
 def migrate_anon_to_user(user_id: str, anon_id: str) -> dict:
     """Claim every recommendation + event tagged with this anon session_id for
     the given user. Idempotent — safe to call on every signin from the same
