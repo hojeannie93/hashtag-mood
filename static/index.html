@@ -1522,14 +1522,35 @@
         await window.Clerk.load();
         clerkReady = true;
         window.Clerk.addListener(handleClerkAuthChange);
-        // Clerk processes any pending OAuth-redirect callback INSIDE load(),
-        // which sets Clerk.user before our listener is registered. addListener
-        // does NOT replay past events, so we'd miss the migrate trigger for
-        // both fresh signups (just-completed redirect) AND returning sessions
-        // (cookie restored on hard-refresh). Fire the handler manually here
-        // for whatever state Clerk landed in.
+
+        // Explicit OAuth callback handling. Clerk.load() does NOT reliably
+        // process the post-redirect callback for custom flows in v5 — auto-
+        // detection is intended for the hosted UI, not for our headless setup.
+        // Detect the marker params Clerk attaches to redirectUrl and call
+        // handleRedirectCallback explicitly.
+        const url = new URL(window.location.href);
+        const hasClerkCallback =
+          url.searchParams.has('__clerk_status') ||
+          url.searchParams.has('__clerk_handshake') ||
+          url.searchParams.has('__clerk_ticket') ||
+          url.hash.includes('__clerk');
+        if (hasClerkCallback) {
+          try {
+            await window.Clerk.handleRedirectCallback({
+              redirectUrl: window.location.pathname,
+              redirectUrlComplete: window.location.pathname,
+            });
+          } catch (e) {
+            console.warn('clerk redirect callback failed:', e);
+          }
+        }
+
+        // Fire migrate handler for the resolved state (returning session or
+        // freshly-completed OAuth) — addListener doesn't replay past events.
         if (window.Clerk.user) {
           await handleClerkAuthChange({ user: window.Clerk.user });
+          await loadJournal();
+          showScreen('screen-journal');
         }
       } catch (e) {
         console.warn('clerk init failed (falling back to anon-only):', e);
@@ -2554,20 +2575,10 @@
       promptInput.focus();
     });
 
-    // ── Landing logic — runs after Clerk + (optional) post-signup migrate ──
-    // If signed in, fetch journal and land there. Otherwise stay on input
-    // (the default 'active' class in markup already points to screen-input).
-    (async () => {
-      try { if (clerkInitPromise) await clerkInitPromise; } catch (e) { /* anon-only */ }
-      // If handleClerkAuthChange fired during init (returning user OR fresh
-      // post-OAuth redirect), wait for its migrate call so the journal fetch
-      // doesn't race the row-claim UPDATE.
-      try { await migratePromise; } catch (e) { /* tolerate */ }
-      if (isAuthed()) {
-        await loadJournal();
-        showScreen('screen-journal');
-      }
-    })();
+    // Landing routing for signed-in users now lives inside initClerk() —
+    // after handleRedirectCallback + handleClerkAuthChange resolve, it calls
+    // loadJournal + showScreen directly. The default screen-input stays
+    // active for anon users.
   </script>
 </body>
 </html>
