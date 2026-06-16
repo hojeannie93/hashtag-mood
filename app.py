@@ -470,13 +470,23 @@ def api_config():
 
 @app.route("/api/auth/migrate", methods=["POST"])
 def api_auth_migrate():
-    """Claim every anonymous entry for the now-signed-in user. Called once by
-    the frontend right after the Clerk auth listener fires."""
+    """Claim anonymous entries for the now-signed-in user.
+
+    Two claim strategies (we use BOTH when both are available):
+    1. session_id (`anon_id`) — bulk-claims every row tagged with this anon
+       browser. Best-effort; fails silently if the session_id was wiped or
+       never persisted (Safari ITP, cleared storage, server restarted, etc).
+    2. `pending_rec_id` — explicit claim of one specific row. The frontend
+       stashes the just-served recommendation_id to localStorage BEFORE the
+       OAuth redirect, so even when the session_id approach finds nothing,
+       the song the user signed up to save is reliably preserved.
+    """
     auth_user = _current_user(request)
     if not auth_user or not auth_user.get("id"):
         return jsonify({"ok": False, "error": "not authenticated"}), 401
     data = request.get_json(silent=True) or {}
     anon_id = (data.get("anon_id") or "").strip() or None
+    pending_rec_id = (data.get("pending_rec_id") or "").strip() or None
     user_id = auth_user["id"]
     provider = _get_primary_provider(user_id)
     db.upsert_user(
@@ -486,7 +496,19 @@ def api_auth_migrate():
         signup_anon_id=anon_id,
     )
     moved = db.migrate_anon_to_user(user_id, anon_id) if anon_id else {"recommendations": 0, "events": 0}
-    return jsonify({"ok": True, "migrated": moved, "primary_provider": provider})
+    pending_claimed = False
+    if pending_rec_id:
+        pending_claimed = db.claim_recommendation(pending_rec_id, user_id)
+        if pending_claimed:
+            # Count it toward the migration total so the frontend's "saved to
+            # your journal ✓" toast fires for the just-preserved song.
+            moved["recommendations"] = max(moved.get("recommendations", 0), 1)
+    return jsonify({
+        "ok": True,
+        "migrated": moved,
+        "pending_claimed": pending_claimed,
+        "primary_provider": provider,
+    })
 
 
 @app.route("/api/journal")

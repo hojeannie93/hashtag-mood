@@ -1801,6 +1801,12 @@
 
     async function gateAnon(originalAction) {
       if (isAuthed()) return originalAction();
+      // Stash the just-served recommendation_id so the post-signin migrate
+      // call can claim it explicitly. Survives the OAuth round-trip via
+      // localStorage (which persists for our origin across cross-origin hops).
+      if (currentResult && currentResult.recommendation_id) {
+        try { localStorage.setItem(PENDING_CLAIM_KEY, currentResult.recommendation_id); } catch (e) {}
+      }
       const opened = openSignIn();
       if (!opened) return originalAction();  // Clerk disabled — let action through
       // Action is NOT auto-re-run after signup. User re-taps deliberately.
@@ -1815,6 +1821,12 @@
     // landed back on input with no signed-in state.
     const SIGNUP_FLAG = 'mood-signup-in-progress';
     const SSO_CALLBACK_PATH = '/sso-callback';
+    // Ferries the just-served recommendation_id across the OAuth round-trip
+    // via localStorage. The post-signin migrate POST passes it to the backend,
+    // which claims that one row explicitly — guarantees the song the user
+    // signed up to save lands in their journal even when session_id matching
+    // finds nothing.
+    const PENDING_CLAIM_KEY = 'mood-pending-claim-rec-id';
 
     async function signInWithGoogle() {
       if (!clerkReady) return;
@@ -1865,15 +1877,22 @@
         try {
           const token = await getAuthToken();
           if (!token) return;
-          console.log('[mood] migrating anon_id=', sessionId);
+          // Both claim strategies: bulk via session_id + explicit via
+          // pending_rec_id (the song the user signed up to save).
+          let pendingRecId = null;
+          try { pendingRecId = localStorage.getItem(PENDING_CLAIM_KEY); } catch (e) {}
+          console.log('[mood] migrating anon_id=', sessionId, 'pending_rec_id=', pendingRecId);
           const resp = await fetch(`${API_BASE}/api/auth/migrate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            body: JSON.stringify({ anon_id: sessionId }),
+            body: JSON.stringify({ anon_id: sessionId, pending_rec_id: pendingRecId }),
           });
           if (resp.ok) {
             lastMigrateResult = await resp.json().catch(() => null);
             console.log('[mood] migrate response:', lastMigrateResult);
+            // Clear the pending claim only on a successful response so a
+            // network failure leaves it in place for a retry on next load.
+            try { localStorage.removeItem(PENDING_CLAIM_KEY); } catch (e) {}
           } else {
             console.warn('[mood] migrate HTTP', resp.status);
           }
@@ -1888,9 +1907,9 @@
           const noun = moved === 1 ? 'song' : 'songs';
           showAuthToast(`${moved} ${noun} saved to your journal ✓`);
         } else {
-          // Migration claimed nothing — either there were no anon entries to
-          // claim, or the session_id was wiped between OAuth hops. Either way,
-          // don't lie. Welcome the user and let them start fresh.
+          // No rows actually moved — either the session_id matching missed
+          // AND no pending claim, OR the local DB is disabled (dev). Don't
+          // claim "saved" if we didn't save anything.
           showAuthToast('welcome — start by exploring a mood');
         }
       }
@@ -2782,7 +2801,14 @@
       } catch (e) { /* analytics — non-blocking */ }
       // Soft prompt: reaction is already logged. If anon, open signup modal
       // afterward — user can dismiss; the reaction stays in the anon session.
-      if (!isAuthed() && newValue !== 0) openSignIn();
+      // Stash the pending claim so the song the user just reacted to gets
+      // explicitly preserved if they sign up.
+      if (!isAuthed() && newValue !== 0) {
+        if (currentResult && currentResult.recommendation_id) {
+          try { localStorage.setItem(PENDING_CLAIM_KEY, currentResult.recommendation_id); } catch (e) {}
+        }
+        openSignIn();
+      }
     }
 
     $('reaction-up').addEventListener('click', () => handleReaction(1));
