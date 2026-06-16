@@ -2414,9 +2414,20 @@
       setTimeout(() => t.remove(), 2200);
     }
     // "save to journal" button. For anon: gateAnon opens the OAuth modal and
-    // the migrate handler claims the just-served entry on signin. For authed:
-    // navigate to the journal (the entry is already auto-logged via user_id).
+    // the migrate handler claims the just-served entry on signin (via the
+    // pending_rec_id stashed in localStorage). For authed: POST the explicit
+    // save endpoint to claim THIS specific recommendation, then navigate.
+    // Without the explicit POST, the journal would never fill — fresh recs
+    // no longer auto-tag with user_id (so alternates the user never tapped
+    // can't silently appear). One tap = one save.
     async function goToJournalFromResult() {
+      if (currentResult && currentResult.recommendation_id) {
+        try {
+          await authedFetch(`${API_BASE}/api/journal/${currentResult.recommendation_id}/save`, {
+            method: 'POST',
+          });
+        } catch (e) { /* tolerate — UI still navigates */ }
+      }
       try { await loadJournal(); } catch (e) { /* tolerate */ }
       showScreen('screen-journal');
     }

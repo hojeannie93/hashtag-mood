@@ -395,23 +395,23 @@ def soft_delete_entry(rec_id: str, user_id: str) -> bool:
 
 
 def migrate_anon_to_user(user_id: str, anon_id: str) -> dict:
-    """Claim every recommendation + event tagged with this anon session_id for
-    the given user. Idempotent — safe to call on every signin from the same
-    anon device. Returns {recommendations: n, events: n} for observability."""
+    """Migrate this anon session's events to the user — NOT recommendations.
+
+    Recommendations are claimed explicitly via the save-to-journal action
+    (`claim_recommendation`, invoked through /api/auth/migrate's
+    pending_rec_id parameter OR /api/journal/<rec_id>/save). Bulk-claiming
+    every served song would dump the alternates the user never even tapped
+    on into their journal — exactly the bug this design fixes.
+
+    Idempotent — safe to call on every signin from the same anon device.
+    Returns {recommendations: 0, events: n} for observability; recommendations
+    is always 0 here so the caller can layer the explicit-claim count on top.
+    """
     if _pool is None or not anon_id or not user_id:
         return {"recommendations": 0, "events": 0}
     try:
         with _conn() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    UPDATE recommendations
-                       SET user_id = %s
-                     WHERE session_id = %s AND user_id IS NULL
-                    """,
-                    (user_id, anon_id),
-                )
-                rec_n = cur.rowcount
                 cur.execute(
                     """
                     UPDATE events
@@ -422,7 +422,7 @@ def migrate_anon_to_user(user_id: str, anon_id: str) -> dict:
                 )
                 evt_n = cur.rowcount
             conn.commit()
-        return {"recommendations": rec_n, "events": evt_n}
+        return {"recommendations": 0, "events": evt_n}
     except Exception as e:
         print(f"db: migrate_anon_to_user failed: {type(e).__name__}: {e}")
         return {"recommendations": 0, "events": 0}
