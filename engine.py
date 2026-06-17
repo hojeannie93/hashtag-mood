@@ -4,7 +4,7 @@
 Usage: python engine.py
 """
 
-import os, json, re
+import os, json, re, time
 import concurrent.futures
 import requests
 import lyricsgenius
@@ -1007,6 +1007,46 @@ def fetch_lyrics(song_title: str, artist: str) -> str | None:
     return None
 
 
+def _bookend_lyrics_for_selection(text: str, head: int = 800, tail: int = 800) -> str:
+    """Return a "bookend" sample of a lyrics block — first `head` chars + last
+    `tail` chars joined by an ellipsis. Songs almost always follow verse-chorus-
+    verse-chorus-bridge-chorus structure; the strongest key-lyric candidates
+    live in the opening (verse 1 + first chorus) and the climax (bridge + final
+    chorus). Sampling those two regions instead of sending the full 4000-char
+    block ~3x shrinks the selection LLM prompt without sacrificing the line the
+    model would actually pick.
+
+    Both cuts are rounded to the nearest line break to avoid mid-word splits.
+    If the song is shorter than head+tail, the full text is returned untouched.
+    The instrumental marker (or any other special-token block) is also passed
+    through whole — we only sample real lyrics.
+    """
+    if not text:
+        return text
+    # Instrumental marker or any sentinel that starts with '[' — pass through.
+    if text.lstrip().startswith("[INSTRUMENTAL"):
+        return text
+    if len(text) <= head + tail:
+        return text
+
+    # Find the first line break at-or-after position `head` so the head ends
+    # cleanly. Fallback to a hard cut if no break is found in the next 200 chars.
+    head_cut = text.find("\n", head)
+    if head_cut == -1 or head_cut > head + 200:
+        head_cut = head
+    head_block = text[:head_cut].rstrip()
+
+    # Find the first line break at-or-before position `len - tail` so the tail
+    # starts cleanly. Fallback to a hard cut.
+    tail_start_target = len(text) - tail
+    tail_cut = text.rfind("\n", 0, tail_start_target)
+    if tail_cut == -1 or tail_cut < tail_start_target - 200:
+        tail_cut = tail_start_target
+    tail_block = text[tail_cut:].lstrip()
+
+    return f"{head_block}\n\n... (middle of song omitted for brevity) ...\n\n{tail_block}"
+
+
 def select_song(user_prompt: str, candidates_with_lyrics: list[dict]) -> list[dict]:
     """Rank candidates from best to worst. Returns a list of pick dicts, each
     with {song_title, artist, key_lyric, iso_reasoning}. picks[0] is the top
@@ -1016,7 +1056,9 @@ def select_song(user_prompt: str, candidates_with_lyrics: list[dict]) -> list[di
         lyrics_block += f"\n\n--- Candidate {i}: {c['song_title']} by {c['artist']} ---\n"
         if c.get("keyword_trap_warning"):
             lyrics_block += f"\n⚠ {c['keyword_trap_warning']}\n"
-        lyrics_block += c.get("lyrics", "[unavailable]")
+        # Bookend-sample the lyrics for the LLM prompt only — the full lyrics
+        # are still attached to the pick for the user-facing lyrics panel.
+        lyrics_block += _bookend_lyrics_for_selection(c.get("lyrics", "[unavailable]"))
 
     resp = client.chat.completions.create(
         model="gpt-4o",
@@ -1095,29 +1137,40 @@ def recommend(
     used_songs: list[str] | None = None,
     category: str | None = None,
 ) -> dict:
+    # Single timing log line at the end of each request gives us real numbers to
+    # tune against. perspective is measured even when skipped (cheap predicate).
+    _t_start = time.perf_counter()
+    _t = {"perspective": 0, "candidates": 0, "lyrics": 0, "selection": 0, "hydrate": 0}
+
     # Safety check — before anything else
     if is_safety_situation(user_prompt):
         return {"safety": True, "message": SAFETY_RESPONSE}
 
     # Perspective pre-step — clarify ambiguous subject before downstream calls
     print("\nReading the situation...")
+    _t_phase = time.perf_counter()
     clarified = disambiguate_perspective(user_prompt)
+    _t["perspective"] = int((time.perf_counter() - _t_phase) * 1000)
     if clarified != user_prompt:
         print(f"  (reading as: {clarified})")
     user_prompt = clarified
 
+    _t_phase = time.perf_counter()
     candidates = get_clean_candidates(user_prompt, used_songs=used_songs, category=category)
     candidates = flag_keyword_traps(user_prompt, candidates)
+    _t["candidates"] = int((time.perf_counter() - _t_phase) * 1000)
 
     # ── Parallel lyric fetch (was sequential — biggest single latency win) ──
     print("Fetching lyrics (parallel)...")
     for c in candidates:
         print(f"  - {c['song_title']} by {c['artist']}")
+    _t_phase = time.perf_counter()
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(len(candidates), 1)) as ex:
         lyrics_results = list(ex.map(
             lambda c: fetch_lyrics(c["song_title"], c["artist"]),
             candidates,
         ))
+    _t["lyrics"] = int((time.perf_counter() - _t_phase) * 1000)
     candidates_with_lyrics = []
     for c, lyrics in zip(candidates, lyrics_results):
         if not lyrics and category == "instrumental":
@@ -1134,7 +1187,9 @@ def recommend(
         raise ValueError("Could not fetch lyrics for any candidates.")
 
     print("Ranking candidates (top match + runner-ups)...")
+    _t_phase = time.perf_counter()
     picks = select_song(user_prompt, candidates_with_lyrics)
+    _t["selection"] = int((time.perf_counter() - _t_phase) * 1000)
 
     # Drop any picks whose song_title+artist doesn't match a candidate (model
     # hallucination), and de-dup while preserving order.
@@ -1169,6 +1224,7 @@ def recommend(
     # Three picks × 2 calls each = 6 tasks; all independent and IO/LLM-bound,
     # so wall-clock is roughly the slowest single one-liner (~1–2s), not 6×.
     print(f"Writing one-liners + fetching iTunes assets for {len(aligned_picks)} pick(s) (parallel)...")
+    _t_phase = time.perf_counter()
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(2 * len(aligned_picks), 1)) as ex:
         oneliner_futures = [
             ex.submit(generate_oneliner, user_prompt, p) for p in aligned_picks
@@ -1179,6 +1235,7 @@ def recommend(
         ]
         oneliners = [f.result() for f in oneliner_futures]
         itunes_tracks = [f.result() for f in itunes_futures]
+    _t["hydrate"] = int((time.perf_counter() - _t_phase) * 1000)
 
     def _pick_payload(p: dict, oneliner: str, itunes_track: dict) -> dict:
         return {
@@ -1195,6 +1252,14 @@ def recommend(
         _pick_payload(p, ol, it)
         for p, ol, it in zip(aligned_picks, oneliners, itunes_tracks)
     ]
+
+    _total = int((time.perf_counter() - _t_start) * 1000)
+    print(
+        f"recommend timing: perspective={_t['perspective']}ms "
+        f"candidates={_t['candidates']}ms lyrics={_t['lyrics']}ms "
+        f"selection={_t['selection']}ms hydrate={_t['hydrate']}ms "
+        f"total={_total}ms"
+    )
 
     return {
         "primary_pick": payloads[0],

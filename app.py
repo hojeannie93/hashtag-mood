@@ -321,6 +321,11 @@ def api_recommend():
         )
         return jsonify({"safety": True, "message": result["message"]})
 
+    # Capture request-context values BEFORE entering any worker thread —
+    # Flask's `request` proxy is bound to the request thread and raises
+    # "Working outside of request context" if accessed from a pool worker.
+    _req_user_agent = request.headers.get("User-Agent")
+
     def _hydrate_pick(pick: dict) -> dict:
         """Turn an engine pick into a fully-shaped client payload — assets,
         streaming links, fresh rec_id — and persist to DB + memory."""
@@ -367,15 +372,24 @@ def api_recommend():
             prompt=prompt,
             category=category,
             result=full_pick,
-            user_agent=request.headers.get("User-Agent"),
+            user_agent=_req_user_agent,
             user_id=None,
         )
         db.set_language(pick_rec_id, detected_lang)
         return full_pick
 
     detected_lang = _detect_language(prompt)
-    primary_full = _hydrate_pick(result["primary_pick"])
-    alternate_fulls = [_hydrate_pick(p) for p in result.get("alternate_picks", [])]
+    # Parallelize hydration across primary + alternates. Each _hydrate_pick is
+    # independent: it builds streaming links, optionally classifies for cat-cover
+    # fallback (LLM call, ~500ms when iTunes art is missing), and fire-and-forget
+    # writes to the DB pool. Sequential at 3 picks was up to ~1.5s on iTunes
+    # misses; parallel-3 collapses that to the slowest single hydrate.
+    import concurrent.futures
+    all_picks = [result["primary_pick"]] + list(result.get("alternate_picks", []))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(len(all_picks), 1)) as ex:
+        hydrated = list(ex.map(_hydrate_pick, all_picks))
+    primary_full = hydrated[0]
+    alternate_fulls = hydrated[1:]
 
     # Response keeps the primary pick's fields at top level (so existing client
     # paths — sync-lyrics, story-card, share — keep working unchanged) and adds
