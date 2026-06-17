@@ -379,23 +379,32 @@ def api_recommend():
         return full_pick
 
     detected_lang = _detect_language(prompt)
-    # Parallelize hydration across primary + alternates. Each _hydrate_pick is
-    # independent: it builds streaming links, optionally classifies for cat-cover
-    # fallback (LLM call, ~500ms when iTunes art is missing), and fire-and-forget
-    # writes to the DB pool. Sequential at 3 picks was up to ~1.5s on iTunes
-    # misses; parallel-3 collapses that to the slowest single hydrate.
+    # Stream the response as ndjson — two JSON lines. The first is the primary
+    # pick (full shape, same fields as the old all-in-one response). The second
+    # is {"alternate_picks": [...]}. Primary is yielded as soon as its hydrate
+    # completes, while alternates' hydrates continue in the background. The
+    # frontend renders the result screen on chunk 1; chunk 2 fills the cached
+    # next-picks for skip. Net win: ~0.5-1s of perceived speed (alternates'
+    # tail hydration no longer blocks the result screen from rendering).
     import concurrent.futures
-    all_picks = [result["primary_pick"]] + list(result.get("alternate_picks", []))
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max(len(all_picks), 1)) as ex:
-        hydrated = list(ex.map(_hydrate_pick, all_picks))
-    primary_full = hydrated[0]
-    alternate_fulls = hydrated[1:]
+    import json as _json
 
-    # Response keeps the primary pick's fields at top level (so existing client
-    # paths — sync-lyrics, story-card, share — keep working unchanged) and adds
-    # alternate_picks for the skip-to-next-song flow.
-    response = {**primary_full, "alternate_picks": alternate_fulls}
-    return jsonify(response)
+    alternate_picks = list(result.get("alternate_picks", []))
+
+    def _stream():
+        # Run primary + alternates hydrates in parallel. Block on primary's
+        # future so we yield it as soon as it's done; collect alternates after.
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=max(1 + len(alternate_picks), 1)
+        ) as ex:
+            primary_future = ex.submit(_hydrate_pick, result["primary_pick"])
+            alt_futures = [ex.submit(_hydrate_pick, p) for p in alternate_picks]
+            primary_full = primary_future.result()
+            yield _json.dumps(primary_full) + "\n"
+            alternate_fulls = [f.result() for f in alt_futures]
+            yield _json.dumps({"alternate_picks": alternate_fulls}) + "\n"
+
+    return Response(_stream(), mimetype="application/x-ndjson")
 
 
 _ITUNES_HOST_RE = re.compile(r"^https://is\d+(?:-ssl)?\.mzstatic\.com/")

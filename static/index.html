@@ -1693,6 +1693,10 @@
     // shown. currentPickIndex points into it. cachedNextPicks holds the unshown
     // alternates from the most recent /api/recommend call. Skipping past the
     // last cached alternate transparently fetches a fresh batch.
+    // Promise that resolves to the alternate picks array once the server's
+    // ndjson stream delivers chunk 2. Awaited by handleSkip if the user taps
+    // skip in the window between chunk 1 (primary rendered) and chunk 2.
+    let pendingAlternates = null;
     let pickStack = [];
     let currentPickIndex = -1;
     let cachedNextPicks = [];
@@ -1977,6 +1981,60 @@
       });
     });
 
+    // Fetches /api/recommend (ndjson-streaming). Returns {primary, altsPromise}.
+    // The primary pick is read off the first line of the stream (so the result
+    // screen can render ~1s before the alternates' tail hydration completes on
+    // the server). altsPromise resolves to the alternates array when chunk 2
+    // arrives (or [] on error). The safety-branch response is still a single
+    // regular-JSON object on one line; it shows up as `primary` with safety:true.
+    async function fetchRecommendStreaming(body) {
+      const resp = await authedFetch(`${API_BASE}/api/recommend`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || `server returned ${resp.status}`);
+      }
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+
+      async function readNextJson() {
+        while (true) {
+          const nl = buffer.indexOf('\n');
+          if (nl >= 0) {
+            const line = buffer.slice(0, nl).trim();
+            buffer = buffer.slice(nl + 1);
+            if (line) return JSON.parse(line);
+            continue;
+          }
+          const { value, done } = await reader.read();
+          if (done) {
+            const remaining = buffer.trim();
+            buffer = '';
+            return remaining ? JSON.parse(remaining) : null;
+          }
+          buffer += decoder.decode(value, { stream: true });
+        }
+      }
+
+      const primary = await readNextJson();
+      const altsPromise = (async () => {
+        try {
+          const second = await readNextJson();
+          if (second && Array.isArray(second.alternate_picks)) return second.alternate_picks;
+          return [];
+        } catch (e) {
+          console.warn('alternates stream failed:', e);
+          return [];
+        } finally {
+          try { reader.releaseLock(); } catch (e) {}
+        }
+      })();
+      return { primary, altsPromise };
+    }
+
     async function submitPrompt() {
       const prompt = promptInput.value.trim();
       if (!prompt) return;
@@ -1984,40 +2042,45 @@
       showScreen('screen-loading');
 
       try {
-        const resp = await authedFetch(`${API_BASE}/api/recommend`, {
-          method: 'POST',
-          body: JSON.stringify({
-            prompt,
-            session_id: sessionId,
-            used_songs: usedSongs,
-            category: selectedCategory,
-          }),
+        const { primary, altsPromise } = await fetchRecommendStreaming({
+          prompt,
+          session_id: sessionId,
+          used_songs: usedSongs,
+          category: selectedCategory,
         });
-        if (!resp.ok) {
-          const err = await resp.json().catch(() => ({}));
-          throw new Error(err.error || `server returned ${resp.status}`);
-        }
-        const data = await resp.json();
 
-        if (data.safety) {
-          $('safety-message').textContent = data.message;
+        if (!primary) throw new Error('empty response');
+        if (primary.safety) {
+          $('safety-message').textContent = primary.message;
           showScreen('screen-safety');
           return;
         }
 
-        // Initialize the pick stack with the primary pick + cache the runners-up.
+        // Initialize pick stack with primary; alternates trickle in via altsPromise.
         currentPrompt = prompt;
         currentRecCategory = selectedCategory;
-        pickStack = [data];
+        pickStack = [primary];
         currentPickIndex = 0;
-        cachedNextPicks = Array.isArray(data.alternate_picks) ? data.alternate_picks.slice() : [];
-        usedSongs.push(`${data.song_title} by ${data.artist}`);
-        renderPick(data);
+        cachedNextPicks = [];
+        pendingAlternates = altsPromise;
+        usedSongs.push(`${primary.song_title} by ${primary.artist}`);
+        renderPick(primary);
         showScreen('screen-result');
         updateNavButtonsState();
-        preloadAlternateAssets();
         logEvent('view');
+
+        // Background: when alternates land, populate the cache + preload art.
+        altsPromise.then((alts) => {
+          // Guard: a fresh-batch fetch may have replaced pendingAlternates by now.
+          if (pendingAlternates === altsPromise) {
+            cachedNextPicks = (alts || []).slice();
+            pendingAlternates = null;
+            preloadAlternateAssets();
+            updateNavButtonsState();
+          }
+        });
       } catch (e) {
+        pendingAlternates = null;
         errorMsg.textContent = `something went wrong: ${e.message}`;
         errorMsg.style.display = 'block';
         showScreen('screen-input');
@@ -2628,7 +2691,23 @@
         return;
       }
 
-      // Case 2: pop the next cached pick (no network call).
+      // Case 2: alternates are still streaming in — wait for them before
+      // falling through to the slow-path fresh-batch fetch. The skip button
+      // shows its loading spinner during the wait.
+      if (pendingAlternates && cachedNextPicks.length === 0) {
+        skipFetchInFlight = true;
+        updateNavButtonsState();
+        try {
+          const alts = await pendingAlternates;
+          cachedNextPicks = (alts || []).slice();
+          pendingAlternates = null;
+          preloadAlternateAssets();
+        } catch (e) { /* tolerate */ }
+        skipFetchInFlight = false;
+        updateNavButtonsState();
+      }
+
+      // Case 3: pop the next cached pick (no network call).
       if (cachedNextPicks.length > 0) {
         const next = cachedNextPicks.shift();
         pickStack.push(next);
@@ -2640,22 +2719,18 @@
         return;
       }
 
-      // Case 3: cache empty AND at stack end → fetch a fresh batch.
+      // Case 4: cache empty AND at stack end → fetch a fresh batch.
       if (!currentPrompt) return;
       skipFetchInFlight = true;
       updateNavButtonsState();
       try {
-        const resp = await authedFetch(`${API_BASE}/api/recommend`, {
-          method: 'POST',
-          body: JSON.stringify({
-            prompt: currentPrompt,
-            session_id: sessionId,
-            used_songs: usedSongs,
-            category: currentRecCategory,
-          }),
+        const { primary: data, altsPromise } = await fetchRecommendStreaming({
+          prompt: currentPrompt,
+          session_id: sessionId,
+          used_songs: usedSongs,
+          category: currentRecCategory,
         });
-        if (!resp.ok) throw new Error(`server returned ${resp.status}`);
-        const data = await resp.json();
+        if (!data) throw new Error('empty response');
         if (data.safety) {
           // Safety path mid-skip is extremely rare but possible if prompt
           // re-triggers the filter on retry. Fall back to the safety screen.
@@ -2664,12 +2739,21 @@
           return;
         }
         pickStack.push(data);
-        cachedNextPicks = Array.isArray(data.alternate_picks) ? data.alternate_picks.slice() : [];
+        cachedNextPicks = [];
+        pendingAlternates = altsPromise;
         currentPickIndex = pickStack.length - 1;
         usedSongs.push(`${data.song_title} by ${data.artist}`);
         renderPick(data);
-        preloadAlternateAssets();
         logEvent('skip', outgoingRecId);
+        // Populate cache when alternates land.
+        altsPromise.then((alts) => {
+          if (pendingAlternates === altsPromise) {
+            cachedNextPicks = (alts || []).slice();
+            pendingAlternates = null;
+            preloadAlternateAssets();
+            updateNavButtonsState();
+          }
+        });
       } catch (e) {
         showToast('couldn’t fetch the next song — try again');
       } finally {
